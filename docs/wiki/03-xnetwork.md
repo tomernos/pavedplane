@@ -1,8 +1,8 @@
 # 03 – XNetwork (networking platform)
 
 **API:** `platform.example.org/v1alpha1`, kind `XNetwork`, cluster-scoped.
-**Files:** `apis/xnetwork/definition.yaml` (XRD), `apis/xnetwork/composition.yaml`
-(Composition), `examples/xnetwork.yaml` (sample).
+**Files:** `apis/xnetwork/definition.yaml` (XRD), `configuration-gcp/compositions/xnetwork.yaml`
+(Composition), `configuration-gcp/examples/xnetwork.yaml` (sample).
 
 ## What one XNetwork produces
 

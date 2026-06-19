@@ -114,7 +114,7 @@ status:
 
 ## Validate locally before applying
 ```bash
-crossplane render examples/xnetwork.yaml apis/xnetwork/composition.yaml bootstrap/02-functions.yaml
+crossplane render configuration-gcp/examples/xnetwork.yaml configuration-gcp/compositions/xnetwork.yaml core/functions.yaml
 ```
 This runs the functions in Docker against the example and prints the rendered
 MRs — it catches template/YAML/indentation bugs without touching the cluster or GCP.

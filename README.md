@@ -1,108 +1,108 @@
-# Crossplane GCP Networking Platform
+# PavedPlane
 
-Crossplane **v2.3** on Docker Desktop Kubernetes, with the **GCP** provider, a
-**go-templating** Composition that generates many VPCs / subnets / Cloud NAT /
-firewall rules from a single declarative API, and **crossview** for visualization.
+**Paved-road infrastructure environments, on any cloud.**
 
-## What's installed
+PavedPlane is an open-source, cloud-neutral platform built on
+[Crossplane](https://crossplane.io). It gives teams a *paved road* to
+infrastructure: apply one small Kubernetes resource describing the VPCs, subnets,
+NAT, firewalls, buckets, and IAM you want — as simple arrays — and PavedPlane
+creates and continuously reconciles them in your cloud, following best practices
+by default.
 
-| Component | Version | Notes |
-|---|---|---|
-| Crossplane core | v2.3.2 | Helm release `crossplane` in `crossplane-system` |
-| Crossplane CLI | v2.3.2 | `~/.local/bin/crossplane` |
-| provider-gcp-compute | v2.4.1 | Pulls in `provider-family-gcp` automatically |
-| function-go-templating | v0.11.4 | Loops over the spec arrays to render resources |
-| function-auto-ready | v0.6.4 | Marks the XR Ready when composed resources are Ready |
-| crossview | latest | Crossplane UI dashboard (namespace `crossview`) |
-
-## Layout
+It's **modular by design**: each API is defined once as a cloud-neutral contract,
+and each cloud ships as a pluggable **configuration module**. GCP is the first
+module; Azure is in progress.
 
 ```
-.
-├── bootstrap/
-│   ├── 01-providers.yaml       # GCP compute provider
-│   ├── 02-functions.yaml       # go-templating + auto-ready functions
-│   └── 03-providerconfig.yaml  # ClusterProviderConfig (needs GCP creds)
-├── apis/
-│   └── xnetwork/
-│       ├── definition.yaml     # XRD (apiextensions.crossplane.io/v2)
-│       └── composition.yaml    # Pipeline Composition w/ go-templating
-├── examples/
-│   └── xnetwork.yaml           # Sample XR: 3 VPCs, subnets, NAT, firewalls
-└── crossview/                  # UI install notes
+apis/xnetwork  (one cloud-neutral API)
+      ├── configuration-gcp    → builds it on GCP
+      └── configuration-azure  → builds it on Azure   (planned)
 ```
 
-## The XNetwork API
+## Why
 
-One `XNetwork` resource describes **arrays** of networking resources. Resources
-reference a VPC by a logical `vpcRef` that matches a `vpcs[].name` (the
-**refName** pattern). The Composition wires them together with label selectors —
-no hard-coded GCP IDs.
+Wiring cloud infra by hand (or copy-pasting Terraform) is repetitive and
+error-prone. PavedPlane turns "I need a standard environment" into one declarative
+object, with the opinionated, safe defaults baked into the Composition — and keeps
+it reconciled, not just created once.
 
-```yaml
-spec:
-  projectID: my-gcp-project
-  vpcs:           [{ name, autoCreateSubnetworks, routingMode }]
-  subnets:        [{ name, vpcRef, region, ipCidrRange, privateIpGoogleAccess }]
-  nats:           [{ name, vpcRef, region, natIpAllocateOption, sourceSubnetworkIpRangesToNat }]
-  firewallRules:  [{ name, vpcRef, direction, priority, sourceRanges, destinationRanges, allow:[{protocol, ports}] }]
-```
-
-Each array entry becomes one (or, for NAT, two) GCP managed resources:
-
-| Spec array | Generated managed resource(s) | refName field |
-|---|---|---|
-| `vpcs[]` | `Network` | `name` (the target of vpcRef) |
-| `subnets[]` | `Subnetwork` | `vpcRef` → a vpc name |
-| `nats[]` | `Router` + `RouterNAT` | `vpcRef` → a vpc name |
-| `firewallRules[]` | `Firewall` | `vpcRef` → a vpc name |
-
-## Install order (from scratch)
+## Quickstart (GCP module)
 
 ```bash
-# 1. Core (already installed via Helm)
+# 1. Crossplane core
 helm repo add crossplane-stable https://charts.crossplane.io/stable
 helm install crossplane crossplane-stable/crossplane \
   -n crossplane-system --create-namespace --wait
 
-# 2. Provider + functions
-kubectl apply -f bootstrap/01-providers.yaml
-kubectl apply -f bootstrap/02-functions.yaml
+# 2. Shared functions + the GCP module's providers
+kubectl apply -f core/functions.yaml
+kubectl apply -f configuration-gcp/providers.yaml
 kubectl wait --for=condition=Healthy --timeout=5m \
-  provider.pkg.crossplane.io/provider-gcp-compute \
-  function.pkg.crossplane.io/function-go-templating \
-  function.pkg.crossplane.io/function-auto-ready
+  provider.pkg.crossplane.io --all function.pkg.crossplane.io --all
 
-# 3. GCP credentials (see header of bootstrap/03-providerconfig.yaml)
-#    Create the gcp-creds Secret, set projectID, then:
-kubectl apply -f bootstrap/03-providerconfig.yaml
+# 3. GCP credentials (creates SA, grants roles, loads key as a Secret)
+bash configuration-gcp/create-sa.sh        # after: gcloud auth login
+kubectl apply -f configuration-gcp/providerconfig.yaml
 
-# 4. The XNetwork API
-kubectl apply -f apis/xnetwork/definition.yaml
-kubectl apply -f apis/xnetwork/composition.yaml
+# 4. The platform APIs (cloud-neutral XRDs + GCP Compositions)
+kubectl apply -f apis/xnetwork/definition.yaml -f configuration-gcp/compositions/xnetwork.yaml
+kubectl apply -f apis/xstorage/definition.yaml -f configuration-gcp/compositions/xstorage.yaml
 
 # 5. Use it
-kubectl apply -f examples/xnetwork.yaml
+kubectl apply -f configuration-gcp/examples/xnetwork.yaml
+kubectl apply -f configuration-gcp/examples/xstorage.yaml
 ```
 
-> Image pulls into the Docker Desktop k8s VM occasionally fail with
-> `unexpected EOF`. It's transient — `kubectl delete pod <stuck-pod> -n <ns>`
-> resets the backoff and the re-pull usually succeeds.
+## Example
 
-## Inspecting a deployment
-
-```bash
-kubectl get xnetwork demo
-kubectl describe xnetwork demo
-# All managed resources for one XNetwork (scoped by the xr label):
-kubectl get network,subnetwork,router,routernat,firewall \
-  -l platform.example.org/xr=demo
-
-# Dry-run the composition locally (no cluster apply) with the CLI:
-crossplane render examples/xnetwork.yaml apis/xnetwork/composition.yaml bootstrap/02-functions.yaml
+```yaml
+apiVersion: platform.example.org/v1alpha1
+kind: XNetwork
+spec:
+  projectID: my-gcp-project
+  vpcs:
+    - { name: prod, routingMode: REGIONAL }
+    - { name: hub,  routingMode: GLOBAL }
+  subnets:
+    - { name: prod-usc, vpcRef: prod, region: us-central1, ipCidrRange: 10.0.0.0/20 }
+  nats:
+    - { name: prod-nat, vpcRef: prod, region: us-central1 }
+  firewallRules:
+    - name: allow-ssh
+      vpcRef: prod
+      direction: INGRESS
+      sourceRanges: ["35.235.240.0/20"]
+      allow: [{ protocol: tcp, ports: ["22"] }]
 ```
 
-## crossview UI
+## Layout
 
-See `crossview/` for the Helm install and the `kubectl port-forward` command to
-reach the dashboard.
+| Path | Purpose |
+|---|---|
+| `apis/` | Cloud-neutral XRDs — the contract every cloud module implements |
+| `core/` | Cloud-agnostic cluster bootstrap (composition functions) |
+| `configuration-gcp/` | The GCP module: providers, Compositions, examples, SA script |
+| `module-template/` | Scaffold + guide for adding a new cloud module |
+| `docs/wiki/` | Full documentation — start at [`docs/wiki/Home.md`](docs/wiki/Home.md) |
+| `CONTRIBUTING.md` | How to add a cloud (your module must satisfy the `apis/` XRDs) |
+| `SUMMARY-FOR-CHATGPT.md` | Single-file explainer to paste into an LLM |
+
+## Status
+
+- **GCP module:** working (VPC/subnet/NAT/firewall + buckets/IAM), validated
+  end-to-end. Providers pinned to v2.4.1 — read
+  [docs/wiki/07-incidents-lessons.md](docs/wiki/07-incidents-lessons.md) before
+  upgrading.
+- **Azure module:** in progress (separate contributor).
+- **`XEnvironment` umbrella API:** planned — one object → a full landing zone.
+
+## Contributing a cloud
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). The short version: implement the existing
+`apis/` XRDs with a Composition under `configuration-<cloud>/`, using
+`module-template/` as a starting point. Your module is interchangeable with
+others because they all satisfy the same API.
+
+## License
+
+TBD (intended: Apache-2.0).

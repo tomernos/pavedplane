@@ -9,22 +9,22 @@ helm install crossplane crossplane-stable/crossplane \
   -n crossplane-system --create-namespace --wait
 
 # 2. Providers + functions
-kubectl apply -f bootstrap/01-providers.yaml
-kubectl apply -f bootstrap/02-functions.yaml
+kubectl apply -f configuration-gcp/providers.yaml
+kubectl apply -f core/functions.yaml
 kubectl wait --for=condition=Healthy --timeout=5m \
   provider.pkg.crossplane.io --all function.pkg.crossplane.io --all
 
 # 3. GCP credentials (creates SA, grants roles, loads key as a Secret)
-bash bootstrap/create-gcp-sa.sh        # run after: gcloud auth login
-kubectl apply -f bootstrap/03-providerconfig.yaml
+bash configuration-gcp/create-sa.sh        # run after: gcloud auth login
+kubectl apply -f configuration-gcp/providerconfig.yaml
 
 # 4. Platform APIs
-kubectl apply -f apis/xnetwork/definition.yaml -f apis/xnetwork/composition.yaml
-kubectl apply -f apis/xstorage/definition.yaml -f apis/xstorage/composition.yaml
+kubectl apply -f apis/xnetwork/definition.yaml -f configuration-gcp/compositions/xnetwork.yaml
+kubectl apply -f apis/xstorage/definition.yaml -f configuration-gcp/compositions/xstorage.yaml
 
 # 5. Use it
-kubectl apply -f examples/xnetwork.yaml
-kubectl apply -f examples/xstorage.yaml
+kubectl apply -f configuration-gcp/examples/xnetwork.yaml
+kubectl apply -f configuration-gcp/examples/xstorage.yaml
 ```
 
 ## Getting the objects (what's deployed)
@@ -91,7 +91,7 @@ gcloud compute routes list --project <p> --filter="network~<vpc>" --format='valu
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| MR `Synced=False`: `ProviderConfig "default" not found` | creds not applied | `kubectl apply -f bootstrap/03-providerconfig.yaml` |
+| MR `Synced=False`: `ProviderConfig "default" not found` | creds not applied | `kubectl apply -f configuration-gcp/providerconfig.yaml` |
 | MR `403 storage.buckets.create denied` | SA missing storage role | grant `roles/storage.admin` (in `create-gcp-sa.sh`) |
 | `kubectl get bucket` hangs | conversion webhook | use `…buckets.v1beta1.storage.gcp.upbound.io` |
 | VPC delete stuck `already being used by routes/...` | GCP default route | delete the route, then the VPC drops |

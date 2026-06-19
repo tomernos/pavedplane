@@ -61,7 +61,7 @@
      go-templating function with this template, then auto-ready."
 
 5. **Composite Resources (XRs)** — the things you actually apply
-   (`examples/xnetwork.yaml`). One XR fans out to many MRs.
+   (`configuration-gcp/examples/xnetwork.yaml`). One XR fans out to many MRs.
 
 6. **crossview** — a read-only dashboard that lists XRs and MRs.
 

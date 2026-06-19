@@ -1,8 +1,8 @@
 # 04 – XStorage (storage platform)
 
 **API:** `platform.example.org/v1alpha1`, kind `XStorage`, cluster-scoped.
-**Files:** `apis/xstorage/definition.yaml`, `apis/xstorage/composition.yaml`,
-`examples/xstorage.yaml`.
+**Files:** `apis/xstorage/definition.yaml`, `configuration-gcp/compositions/xstorage.yaml`,
+`configuration-gcp/examples/xstorage.yaml`.
 
 ## What one XStorage produces
 
