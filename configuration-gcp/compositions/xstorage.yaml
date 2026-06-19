@@ -7,6 +7,8 @@ apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
   name: xstorage-gcp
+  labels:
+    cloud: gcp          # lets an XStorage / XEnvironment target GCP via compositionSelector
 spec:
   compositeTypeRef:
     apiVersion: platform.example.org/v1alpha1

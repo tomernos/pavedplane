@@ -1,0 +1,48 @@
+# XEnvironment — the umbrella API. One object → a full environment on the chosen
+# cloud. It composes child XNetwork + XStorage XRs and propagates the cloud choice
+# down to them, so the consumer picks the cloud ONCE (spec.cloud).
+#
+# Cloud-neutral: this XRD has no GCP/Azure specifics. The child XRs select their
+# per-cloud Composition (labelled `cloud: <spec.cloud>`).
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xenvironments.platform.example.org
+spec:
+  scope: Cluster
+  group: platform.example.org
+  names:
+    kind: XEnvironment
+    plural: xenvironments
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [cloud, projectID]
+              properties:
+                cloud:
+                  type: string
+                  enum: [gcp, azure]
+                  description: Which cloud module builds this environment.
+                projectID:
+                  type: string
+                  description: Cloud project (GCP) / equivalent id, passed to modules.
+                network:
+                  type: object
+                  description: XNetwork spec (vpcs/subnets/nats/firewallRules). Validated by the XNetwork XRD on the child.
+                  x-kubernetes-preserve-unknown-fields: true
+                storage:
+                  type: object
+                  description: XStorage spec (buckets/iamMembers). Validated by the XStorage XRD on the child.
+                  x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              properties:
+                cloud:
+                  type: string

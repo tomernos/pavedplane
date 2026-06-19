@@ -13,6 +13,8 @@ apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
   name: xnetwork-gcp
+  labels:
+    cloud: gcp          # lets an XNetwork / XEnvironment target GCP via compositionSelector
 spec:
   compositeTypeRef:
     apiVersion: platform.example.org/v1alpha1

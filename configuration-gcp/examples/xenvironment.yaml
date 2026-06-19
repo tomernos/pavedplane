@@ -1,0 +1,42 @@
+# One object → a full environment on GCP.
+# spec.cloud picks the cloud once; it cascades to the child XNetwork + XStorage,
+# which select the GCP module (Compositions labelled cloud: gcp).
+apiVersion: platform.example.org/v1alpha1
+kind: XEnvironment
+metadata:
+  name: demo-env
+spec:
+  cloud: gcp
+  projectID: devopslab-tuzel
+
+  network:
+    vpcs:
+      - { name: prod, autoCreateSubnetworks: false, routingMode: REGIONAL }
+    subnets:
+      - name: prod-usc
+        vpcRef: prod
+        region: us-central1
+        ipCidrRange: 10.0.0.0/20
+    nats:
+      - { name: prod-nat, vpcRef: prod, region: us-central1 }
+    firewallRules:
+      - name: allow-ssh
+        vpcRef: prod
+        direction: INGRESS
+        sourceRanges: ["35.235.240.0/20"]
+        allow:
+          - { protocol: tcp, ports: ["22"] }
+
+  storage:
+    buckets:
+      - name: devopslab-tuzel-env-data
+        location: US
+        storageClass: STANDARD
+        versioning: true
+        uniformBucketLevelAccess: true
+        forceDestroy: true
+    iamMembers:
+      - name: data-sa-admin
+        bucketRef: devopslab-tuzel-env-data
+        role: roles/storage.objectAdmin
+        member: serviceAccount:crossplane@devopslab-tuzel.iam.gserviceaccount.com

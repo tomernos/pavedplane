@@ -1,0 +1,67 @@
+# Composition for XEnvironment — CLOUD-NEUTRAL.
+#
+# It does not touch any cloud provider directly. It fans out into child
+# XNetwork + XStorage composite resources, and sets their compositionSelector to
+# `cloud: <spec.cloud>` so each child is built by the matching per-cloud module
+# (e.g. xnetwork-gcp / xnetwork-azure). The consumer chooses the cloud ONCE.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xenvironment
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XEnvironment
+  mode: Pipeline
+  pipeline:
+    - step: fan-out
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource }}
+            {{- $cloud := $xr.spec.cloud }}
+            {{- $project := $xr.spec.projectID }}
+
+            {{- with $xr.spec.network }}
+            ---
+            apiVersion: platform.example.org/v1alpha1
+            kind: XNetwork
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: network
+            spec:
+              compositionSelector:
+                matchLabels:
+                  cloud: {{ $cloud | quote }}
+              projectID: {{ $project | quote }}
+              {{- toYaml . | nindent 2 }}
+            {{- end }}
+
+            {{- with $xr.spec.storage }}
+            ---
+            apiVersion: platform.example.org/v1alpha1
+            kind: XStorage
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: storage
+            spec:
+              compositionSelector:
+                matchLabels:
+                  cloud: {{ $cloud | quote }}
+              projectID: {{ $project | quote }}
+              {{- toYaml . | nindent 2 }}
+            {{- end }}
+            ---
+            apiVersion: platform.example.org/v1alpha1
+            kind: XEnvironment
+            status:
+              cloud: {{ $cloud | quote }}
+
+    - step: ready
+      functionRef:
+        name: function-auto-ready
