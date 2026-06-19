@@ -1,0 +1,44 @@
+# GCP provider — networking family.
+#
+# Installing provider-gcp-compute pulls in provider-family-gcp automatically
+# (the family package owns the shared ProviderConfig CRD). The compute provider
+# is the ONLY GCP sub-provider we need: Network, Subnetwork, Router, RouterNAT
+# and Firewall all live in the compute.gcp.upbound.io API group.
+#
+# Installing the monolithic provider-gcp instead would register every GCP CRD
+# (~1000s) and start far slower — avoid it.
+# The shared family package — pin it EXPLICITLY to the same version as the
+# sub-providers. It is auto-installed as a dependency, but a dependency-created
+# family Provider does not self-bump, so an explicit pin is required to upgrade
+# all three together. Version skew here blocks the sub-provider revisions with
+# "incompatible dependencies".
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: upbound-provider-family-gcp
+spec:
+  package: xpkg.upbound.io/upbound/provider-family-gcp:v2.4.1
+  revisionActivationPolicy: Automatic
+  revisionHistoryLimit: 1
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-gcp-compute
+spec:
+  package: xpkg.upbound.io/upbound/provider-gcp-compute:v2.4.1
+  # Keep the provider alive across upgrades; revisions are GC'd to 1.
+  revisionActivationPolicy: Automatic
+  revisionHistoryLimit: 1
+---
+# GCS buckets + bucket IAM. Same family version (v2.4.1) as the compute
+# provider — all sub-providers in a family MUST share one family version or the
+# shared provider-family-gcp package conflicts.
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-gcp-storage
+spec:
+  package: xpkg.upbound.io/upbound/provider-gcp-storage:v2.4.1
+  revisionActivationPolicy: Automatic
+  revisionHistoryLimit: 1

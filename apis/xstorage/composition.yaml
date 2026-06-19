@@ -1,0 +1,196 @@
+# Composition for XStorage — Pipeline mode (go-templating + auto-ready).
+#
+# Targets provider-gcp-storage v2.4.1 (storage.gcp.upbound.io/v1beta1), whose
+# nested config blocks are Terraform-style single-element ARRAYS
+# (versioning: [{enabled}], etc.). cors and lifecycleRule are genuine arrays.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xstorage-gcp
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XStorage
+  mode: Pipeline
+  pipeline:
+    - step: render-resources
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource }}
+            {{- $xrName := $xr.metadata.name }}
+            {{- $project := $xr.spec.projectID }}
+            {{- range $b := $xr.spec.buckets }}
+            ---
+            apiVersion: storage.gcp.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ printf "bucket-%s" $b.name | quote }}
+                crossplane.io/external-name: {{ $b.name | quote }}
+              labels:
+                platform.example.org/xr: {{ $xrName | quote }}
+                platform.example.org/bucket: {{ $b.name | quote }}
+            spec:
+              forProvider:
+                project: {{ $project | quote }}
+                location: {{ $b.location | quote }}
+                storageClass: {{ $b.storageClass | default "STANDARD" | quote }}
+                forceDestroy: {{ $b.forceDestroy | default false }}
+                uniformBucketLevelAccess: {{ $b.uniformBucketLevelAccess | default true }}
+                publicAccessPrevention: {{ $b.publicAccessPrevention | default "enforced" | quote }}
+                requesterPays: {{ $b.requesterPays | default false }}
+                defaultEventBasedHold: {{ $b.defaultEventBasedHold | default false }}
+                versioning:
+                  - enabled: {{ $b.versioning | default false }}
+                {{- with $b.labels }}
+                labels:
+                  {{- range $k, $v := . }}
+                  {{ $k }}: {{ $v | quote }}
+                  {{- end }}
+                {{- end }}
+                {{- with $b.encryptionKmsKey }}
+                encryption:
+                  - defaultKmsKeyName: {{ . | quote }}
+                {{- end }}
+                {{- with $b.logging }}
+                logging:
+                  - logBucket: {{ .logBucket | quote }}
+                    {{- with .logObjectPrefix }}
+                    logObjectPrefix: {{ . | quote }}
+                    {{- end }}
+                {{- end }}
+                {{- with $b.website }}
+                website:
+                  - mainPageSuffix: {{ .mainPageSuffix | quote }}
+                    {{- with .notFoundPage }}
+                    notFoundPage: {{ . | quote }}
+                    {{- end }}
+                {{- end }}
+                {{- with $b.retentionPolicy }}
+                retentionPolicy:
+                  - retentionPeriod: {{ .retentionPeriod }}
+                    isLocked: {{ .isLocked | default false }}
+                {{- end }}
+                {{- with $b.autoclass }}
+                autoclass:
+                  - enabled: {{ .enabled | default false }}
+                    {{- with .terminalStorageClass }}
+                    terminalStorageClass: {{ . | quote }}
+                    {{- end }}
+                {{- end }}
+                {{- if $b.softDeleteRetentionSeconds }}
+                softDeletePolicy:
+                  - retentionDurationSeconds: {{ $b.softDeleteRetentionSeconds }}
+                {{- end }}
+                {{- with $b.cors }}
+                cors:
+                  {{- range $c := . }}
+                  - maxAgeSeconds: {{ $c.maxAgeSeconds | default 3600 }}
+                    {{- with $c.origin }}
+                    origin:
+                      {{- range $o := . }}
+                      - {{ $o | quote }}
+                      {{- end }}
+                    {{- end }}
+                    {{- with $c.method }}
+                    method:
+                      {{- range $m := . }}
+                      - {{ $m | quote }}
+                      {{- end }}
+                    {{- end }}
+                    {{- with $c.responseHeader }}
+                    responseHeader:
+                      {{- range $h := . }}
+                      - {{ $h | quote }}
+                      {{- end }}
+                    {{- end }}
+                  {{- end }}
+                {{- end }}
+                {{- with $b.lifecycleRules }}
+                lifecycleRule:
+                  {{- range $lr := . }}
+                  - action:
+                      - type: {{ $lr.action.type | quote }}
+                        {{- with $lr.action.storageClass }}
+                        storageClass: {{ . | quote }}
+                        {{- end }}
+                    {{- with $lr.condition }}
+                    condition:
+                      -
+                        {{- with .age }}
+                        age: {{ . }}
+                        {{- end }}
+                        {{- with .createdBefore }}
+                        createdBefore: {{ . | quote }}
+                        {{- end }}
+                        {{- with .numNewerVersions }}
+                        numNewerVersions: {{ . }}
+                        {{- end }}
+                        {{- with .daysSinceCustomTime }}
+                        daysSinceCustomTime: {{ . }}
+                        {{- end }}
+                        {{- with .withState }}
+                        withState: {{ . | quote }}
+                        {{- end }}
+                        {{- with .matchesStorageClass }}
+                        matchesStorageClass:
+                          {{- range $s := . }}
+                          - {{ $s | quote }}
+                          {{- end }}
+                        {{- end }}
+                        {{- with .matchesPrefix }}
+                        matchesPrefix:
+                          {{- range $p := . }}
+                          - {{ $p | quote }}
+                          {{- end }}
+                        {{- end }}
+                        {{- with .matchesSuffix }}
+                        matchesSuffix:
+                          {{- range $s := . }}
+                          - {{ $s | quote }}
+                          {{- end }}
+                        {{- end }}
+                    {{- end }}
+                  {{- end }}
+                {{- end }}
+            {{- end }}
+            {{- range $m := $xr.spec.iamMembers }}
+            ---
+            apiVersion: storage.gcp.upbound.io/v1beta1
+            kind: BucketIAMMember
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ printf "iam-%s" $m.name | quote }}
+            spec:
+              forProvider:
+                role: {{ $m.role | quote }}
+                member: {{ $m.member | quote }}
+                bucketSelector:
+                  matchLabels:
+                    platform.example.org/xr: {{ $xrName | quote }}
+                    platform.example.org/bucket: {{ $m.bucketRef | quote }}
+                {{- with $m.condition }}
+                condition:
+                  - title: {{ .title | quote }}
+                    expression: {{ .expression | quote }}
+                    {{- with .description }}
+                    description: {{ . | quote }}
+                    {{- end }}
+                {{- end }}
+            {{- end }}
+            ---
+            apiVersion: platform.example.org/v1alpha1
+            kind: XStorage
+            status:
+              bucketCount: {{ len ($xr.spec.buckets | default list) }}
+              iamMemberCount: {{ len ($xr.spec.iamMembers | default list) }}
+
+    - step: ready
+      functionRef:
+        name: function-auto-ready

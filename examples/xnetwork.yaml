@@ -1,0 +1,80 @@
+# Example XNetwork — demonstrates many VPCs with different options, plus
+# subnets / NAT / firewall rules that reference VPCs by refName (vpcRef).
+#
+# Apply after the provider is Healthy and the ProviderConfig has real creds:
+#   kubectl apply -f examples/xnetwork.yaml
+#   kubectl get xnetwork demo -w
+#   kubectl get network,subnetwork,router,routernat,firewall -l platform.example.org/xr=demo
+apiVersion: platform.example.org/v1alpha1
+kind: XNetwork
+metadata:
+  name: demo
+spec:
+  projectID: devopslab-tuzel
+
+  vpcs:
+    - name: prod              # custom-mode, regional routing
+      autoCreateSubnetworks: false
+      routingMode: REGIONAL
+    - name: hub               # global routing for cross-region peering
+      autoCreateSubnetworks: false
+      routingMode: GLOBAL
+    - name: sandbox           # auto-mode VPC (Google creates subnets)
+      autoCreateSubnetworks: true
+
+  subnets:
+    - name: prod-us-central
+      vpcRef: prod            # -> vpcs[0]
+      region: us-central1
+      ipCidrRange: 10.0.0.0/20
+      privateIpGoogleAccess: true
+    - name: prod-europe-west
+      vpcRef: prod            # second subnet in the same VPC
+      region: europe-west1
+      ipCidrRange: 10.0.16.0/20
+    - name: hub-us-central
+      vpcRef: hub             # -> vpcs[1]
+      region: us-central1
+      ipCidrRange: 10.10.0.0/20
+
+  nats:
+    - name: prod-nat-usc
+      vpcRef: prod
+      region: us-central1
+      natIpAllocateOption: AUTO_ONLY
+      sourceSubnetworkIpRangesToNat: ALL_SUBNETWORKS_ALL_IP_RANGES
+    - name: hub-nat-usc
+      vpcRef: hub
+      region: us-central1
+
+  firewallRules:
+    - name: prod-allow-internal
+      vpcRef: prod
+      direction: INGRESS
+      priority: 1000
+      sourceRanges:
+        - 10.0.0.0/8
+      allow:
+        - protocol: tcp
+          ports: ["0-65535"]
+        - protocol: udp
+          ports: ["0-65535"]
+        - protocol: icmp
+    - name: prod-allow-ssh
+      vpcRef: prod
+      direction: INGRESS
+      priority: 900
+      sourceRanges:
+        - 35.235.240.0/20      # GCP IAP range
+      allow:
+        - protocol: tcp
+          ports: ["22"]
+    - name: hub-deny-egress-quic
+      vpcRef: hub
+      direction: EGRESS
+      priority: 2000
+      destinationRanges:
+        - 0.0.0.0/0
+      allow:
+        - protocol: udp
+          ports: ["443"]

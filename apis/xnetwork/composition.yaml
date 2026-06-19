@@ -1,0 +1,170 @@
+# Composition for XNetwork — Pipeline mode, two functions:
+#   1. function-go-templating : loops over the spec arrays and renders one or
+#      more GCP managed resources per array entry.
+#   2. function-auto-ready    : flips the XR to READY once all composed
+#      resources are Ready.
+#
+# Cross-references (refName) are resolved with label selectors:
+#   every Network is labelled  platform.example.org/vpc: <vpcs[].name>
+#                              platform.example.org/xr:  <xr name>
+#   subnets / nats / firewalls select their VPC by matching those labels,
+#   so subnets[].vpcRef == vpcs[].name links them with no hard-coded IDs.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xnetwork-gcp
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.org/v1alpha1
+    kind: XNetwork
+  mode: Pipeline
+  pipeline:
+    - step: render-resources
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := .observed.composite.resource }}
+            {{- $xrName := $xr.metadata.name }}
+            {{- $project := $xr.spec.projectID }}
+
+            {{- /* ============ VPC networks ============ */}}
+            {{- range $vpc := $xr.spec.vpcs }}
+            ---
+            apiVersion: compute.gcp.upbound.io/v1beta1
+            kind: Network
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ printf "vpc-%s" $vpc.name | quote }}
+                crossplane.io/external-name: {{ printf "%s-%s" $xrName $vpc.name | quote }}
+              labels:
+                platform.example.org/xr: {{ $xrName | quote }}
+                platform.example.org/vpc: {{ $vpc.name | quote }}
+            spec:
+              forProvider:
+                project: {{ $project | quote }}
+                autoCreateSubnetworks: {{ $vpc.autoCreateSubnetworks }}
+                routingMode: {{ $vpc.routingMode | quote }}
+            {{- end }}
+
+            {{- /* ============ Subnetworks ============ */}}
+            {{- range $subnet := $xr.spec.subnets }}
+            ---
+            apiVersion: compute.gcp.upbound.io/v1beta1
+            kind: Subnetwork
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ printf "subnet-%s" $subnet.name | quote }}
+                crossplane.io/external-name: {{ printf "%s-%s" $xrName $subnet.name | quote }}
+            spec:
+              forProvider:
+                project: {{ $project | quote }}
+                region: {{ $subnet.region | quote }}
+                ipCidrRange: {{ $subnet.ipCidrRange | quote }}
+                privateIpGoogleAccess: {{ $subnet.privateIpGoogleAccess | default true }}
+                networkSelector:
+                  matchLabels:
+                    platform.example.org/xr: {{ $xrName | quote }}
+                    platform.example.org/vpc: {{ $subnet.vpcRef | quote }}
+            {{- end }}
+
+            {{- /* ============ Cloud NAT (Router + RouterNAT) ============ */}}
+            {{- range $nat := $xr.spec.nats }}
+            ---
+            apiVersion: compute.gcp.upbound.io/v1beta1
+            kind: Router
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ printf "router-%s" $nat.name | quote }}
+                crossplane.io/external-name: {{ printf "%s-%s-rtr" $xrName $nat.name | quote }}
+              labels:
+                platform.example.org/xr: {{ $xrName | quote }}
+                platform.example.org/nat: {{ $nat.name | quote }}
+            spec:
+              forProvider:
+                project: {{ $project | quote }}
+                region: {{ $nat.region | quote }}
+                networkSelector:
+                  matchLabels:
+                    platform.example.org/xr: {{ $xrName | quote }}
+                    platform.example.org/vpc: {{ $nat.vpcRef | quote }}
+            ---
+            apiVersion: compute.gcp.upbound.io/v1beta1
+            kind: RouterNAT
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ printf "nat-%s" $nat.name | quote }}
+                crossplane.io/external-name: {{ printf "%s-%s" $xrName $nat.name | quote }}
+            spec:
+              forProvider:
+                project: {{ $project | quote }}
+                region: {{ $nat.region | quote }}
+                natIpAllocateOption: {{ $nat.natIpAllocateOption | default "AUTO_ONLY" | quote }}
+                sourceSubnetworkIpRangesToNat: {{ $nat.sourceSubnetworkIpRangesToNat | default "ALL_SUBNETWORKS_ALL_IP_RANGES" | quote }}
+                routerSelector:
+                  matchLabels:
+                    platform.example.org/xr: {{ $xrName | quote }}
+                    platform.example.org/nat: {{ $nat.name | quote }}
+            {{- end }}
+
+            {{- /* ============ Firewall rules ============ */}}
+            {{- range $fw := $xr.spec.firewallRules }}
+            ---
+            apiVersion: compute.gcp.upbound.io/v1beta1
+            kind: Firewall
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ printf "fw-%s" $fw.name | quote }}
+                crossplane.io/external-name: {{ printf "%s-%s" $xrName $fw.name | quote }}
+            spec:
+              forProvider:
+                project: {{ $project | quote }}
+                direction: {{ $fw.direction | quote }}
+                priority: {{ $fw.priority | default 1000 }}
+                networkSelector:
+                  matchLabels:
+                    platform.example.org/xr: {{ $xrName | quote }}
+                    platform.example.org/vpc: {{ $fw.vpcRef | quote }}
+                {{- with $fw.sourceRanges }}
+                sourceRanges:
+                  {{- range $r := . }}
+                  - {{ $r | quote }}
+                  {{- end }}
+                {{- end }}
+                {{- with $fw.destinationRanges }}
+                destinationRanges:
+                  {{- range $r := . }}
+                  - {{ $r | quote }}
+                  {{- end }}
+                {{- end }}
+                {{- with $fw.allow }}
+                allow:
+                  {{- range $a := . }}
+                  - protocol: {{ $a.protocol | quote }}
+                    {{- with $a.ports }}
+                    ports:
+                      {{- range $p := . }}
+                      - {{ $p | quote }}
+                      {{- end }}
+                    {{- end }}
+                  {{- end }}
+                {{- end }}
+            {{- end }}
+
+            {{- /* ============ Write counts back to XR status ============ */}}
+            ---
+            apiVersion: platform.example.org/v1alpha1
+            kind: XNetwork
+            status:
+              vpcCount: {{ len ($xr.spec.vpcs | default list) }}
+              subnetCount: {{ len ($xr.spec.subnets | default list) }}
+              natCount: {{ len ($xr.spec.nats | default list) }}
+              firewallCount: {{ len ($xr.spec.firewallRules | default list) }}
+
+    - step: ready
+      functionRef:
+        name: function-auto-ready

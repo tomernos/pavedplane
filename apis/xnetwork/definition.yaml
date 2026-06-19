@@ -1,0 +1,162 @@
+# CompositeResourceDefinition (XRD) — the API your users write against.
+#
+# Crossplane v2 notes:
+#   - apiVersion apiextensions.crossplane.io/v2 (v1 is deprecated in v2.3)
+#   - spec.scope: Cluster  -> the XR and the resources it composes are
+#     cluster-scoped (right for shared network infrastructure). v2 replaced the
+#     old claimNames mechanism with this scope field.
+#
+# The schema is "arrays of resources" with cross-references by logical name:
+#   - vpcs[].name           is the refName a subnet/nat/firewall points at
+#   - subnets[].vpcRef      -> matches a vpcs[].name
+#   - nats[].vpcRef         -> matches a vpcs[].name
+#   - firewallRules[].vpcRef-> matches a vpcs[].name
+# The Composition resolves these refs via label selectors (see composition.yaml).
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xnetworks.platform.example.org
+spec:
+  scope: Cluster
+  group: platform.example.org
+  names:
+    kind: XNetwork
+    plural: xnetworks
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - projectID
+                - vpcs
+              properties:
+                projectID:
+                  type: string
+                  description: GCP project ID all resources are created in.
+
+                # ---- VPC networks --------------------------------------------
+                vpcs:
+                  type: array
+                  description: One or more VPC networks. name is the refName.
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [name]
+                    properties:
+                      name:
+                        type: string
+                        description: Logical name (refName) and GCP network name.
+                      autoCreateSubnetworks:
+                        type: boolean
+                        default: false
+                        description: false = custom-mode VPC (recommended).
+                      routingMode:
+                        type: string
+                        enum: [REGIONAL, GLOBAL]
+                        default: REGIONAL
+
+                # ---- Subnetworks ---------------------------------------------
+                subnets:
+                  type: array
+                  items:
+                    type: object
+                    required: [name, vpcRef, region, ipCidrRange]
+                    properties:
+                      name:
+                        type: string
+                      vpcRef:
+                        type: string
+                        description: Must match one of vpcs[].name.
+                      region:
+                        type: string
+                      ipCidrRange:
+                        type: string
+                        description: Primary CIDR, e.g. 10.0.0.0/24.
+                      privateIpGoogleAccess:
+                        type: boolean
+                        default: true
+
+                # ---- Cloud NAT (Router + RouterNAT per entry) ----------------
+                nats:
+                  type: array
+                  items:
+                    type: object
+                    required: [name, vpcRef, region]
+                    properties:
+                      name:
+                        type: string
+                      vpcRef:
+                        type: string
+                        description: Must match one of vpcs[].name.
+                      region:
+                        type: string
+                      natIpAllocateOption:
+                        type: string
+                        enum: [AUTO_ONLY, MANUAL_ONLY]
+                        default: AUTO_ONLY
+                      sourceSubnetworkIpRangesToNat:
+                        type: string
+                        enum:
+                          - ALL_SUBNETWORKS_ALL_IP_RANGES
+                          - ALL_SUBNETWORKS_ALL_PRIMARY_IP_RANGES
+                          - LIST_OF_SUBNETWORKS
+                        default: ALL_SUBNETWORKS_ALL_IP_RANGES
+
+                # ---- Firewall rules ------------------------------------------
+                firewallRules:
+                  type: array
+                  items:
+                    type: object
+                    required: [name, vpcRef, direction]
+                    properties:
+                      name:
+                        type: string
+                      vpcRef:
+                        type: string
+                        description: Must match one of vpcs[].name.
+                      direction:
+                        type: string
+                        enum: [INGRESS, EGRESS]
+                        default: INGRESS
+                      priority:
+                        type: integer
+                        default: 1000
+                      sourceRanges:
+                        type: array
+                        items:
+                          type: string
+                      destinationRanges:
+                        type: array
+                        items:
+                          type: string
+                      allow:
+                        type: array
+                        description: Allowed protocol/port combinations.
+                        items:
+                          type: object
+                          required: [protocol]
+                          properties:
+                            protocol:
+                              type: string
+                              description: e.g. tcp, udp, icmp, all.
+                            ports:
+                              type: array
+                              items:
+                                type: string
+            status:
+              type: object
+              properties:
+                vpcCount:
+                  type: integer
+                subnetCount:
+                  type: integer
+                natCount:
+                  type: integer
+                firewallCount:
+                  type: integer

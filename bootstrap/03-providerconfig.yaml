@@ -1,0 +1,39 @@
+# ClusterProviderConfig for the classic (cluster-scoped) GCP managed resources.
+#
+# Cluster-scoped MRs in the compute.gcp.upbound.io group resolve their config
+# from the classic ProviderConfig named "default" by default — so every Network,
+# Subnetwork, Router, RouterNAT and Firewall we generate uses this automatically,
+# with no per-resource providerConfigRef needed.
+#
+# PREREQUISITE — create the credentials Secret first (NOT committed to git):
+#
+#   # 1. Create a GCP service account + key (one-time, run with gcloud):
+#   gcloud iam service-accounts create crossplane \
+#       --project=<PROJECT_ID> --display-name="Crossplane"
+#   gcloud projects add-iam-policy-binding <PROJECT_ID> \
+#       --member="serviceAccount:crossplane@<PROJECT_ID>.iam.gserviceaccount.com" \
+#       --role="roles/compute.networkAdmin"
+#   gcloud iam service-accounts keys create /tmp/gcp-creds.json \
+#       --iam-account=crossplane@<PROJECT_ID>.iam.gserviceaccount.com
+#
+#   # 2. Load the key into the cluster as a Secret:
+#   kubectl create secret generic gcp-creds \
+#       -n crossplane-system \
+#       --from-file=credentials.json=/tmp/gcp-creds.json
+#
+#   # 3. Shred the local key:
+#   shred -u /tmp/gcp-creds.json
+#
+# Then edit projectID below and apply this file.
+apiVersion: gcp.upbound.io/v1beta1
+kind: ProviderConfig
+metadata:
+  name: default
+spec:
+  projectID: devopslab-tuzel
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: crossplane-system
+      name: gcp-creds
+      key: credentials.json

@@ -1,0 +1,22 @@
+# Composition functions used by the XNetwork pipeline.
+#
+# function-go-templating  -> renders managed resources by looping over the
+#                            arrays in the XR spec (vpcs, subnets, nats,
+#                            firewallRules). This is what makes "many VPCs in
+#                            many options" possible from one claim.
+# function-auto-ready      -> marks the composite (XR) Ready once all the
+#                            resources it composed report Ready. Without it the
+#                            XR would never flip to READY=True.
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-go-templating
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/function-go-templating:v0.11.4
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-auto-ready
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.6.4
