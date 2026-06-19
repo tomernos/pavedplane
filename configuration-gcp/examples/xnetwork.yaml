@@ -10,6 +10,11 @@ kind: XNetwork
 metadata:
   name: demo
 spec:
+  # Pick the cloud module (Composition labelled cloud: gcp). Required once more
+  # than one cloud implements XNetwork; harmless with a single module today.
+  compositionSelector:
+    matchLabels:
+      cloud: gcp
   projectID: devopslab-tuzel
 
   vpcs:

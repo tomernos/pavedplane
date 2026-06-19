@@ -8,6 +8,9 @@ kind: XStorage
 metadata:
   name: demo-storage
 spec:
+  compositionSelector:
+    matchLabels:
+      cloud: gcp
   projectID: devopslab-tuzel
 
   buckets:
