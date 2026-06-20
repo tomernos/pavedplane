@@ -1,0 +1,88 @@
+apiVersion: platform.example.io/v1alpha1
+kind: XPlatformFirewallV3
+metadata:
+  name: prod-fw
+spec:
+  crossplane:
+    compositionRef:
+      name: azure-firewall-v3-stack
+  parameters:
+    location: "West Europe"
+    # Deploy into an existing resource group instead of creating one:
+    # resourceGroupNameRef:
+    #   name: prod-environment-rg
+    tags:
+      environment: "production"
+      managed-by: "crossplane"
+    skuName: "AZFW_VNet"
+    skuTier: "Standard"
+    threatIntelMode: "Alert"
+    resourceGroupNameRef:
+      name: prod-environment-rg
+
+    # The firewall must be placed in a subnet named AzureFirewallSubnet.
+    # Use subnetRef/publicIpRef (Kubernetes object names) or raw Azure IDs.
+    ipConfigurations:
+      - name: "primary"
+        # full Kubernetes object names from the network stack (lowercase)
+        subnetRef: "prod-environment-fw-subnet"
+        publicIpRef: "prod-environment-fw-public-ip"
+
+    # Modern model: Firewall Policy + rule collection groups
+    policy:
+      enabled: true
+      sku: "Standard"
+      threatIntelligenceMode: "Alert"
+      dnsProxyEnabled: true
+      dnsServers: ["10.0.0.4"]
+
+    policyRuleCollectionGroups:
+      - name: "default-group"
+        priority: 500
+        applicationRuleCollections:
+          - name: "allow-web"
+            priority: 100
+            action: "Allow"
+            rules:
+              - name: "allow-microsoft"
+                protocols:
+                  - type: "Https"
+                    port: 443
+                sourceAddresses: ["10.0.0.0/16"]
+                destinationFqdns: ["*.microsoft.com"]
+        networkRuleCollections:
+          - name: "allow-dns"
+            priority: 200
+            action: "Allow"
+            rules:
+              - name: "dns-out"
+                protocols: ["UDP"]
+                sourceAddresses: ["10.0.0.0/16"]
+                destinationAddresses: ["8.8.8.8", "8.8.4.4"]
+                destinationPorts: ["53"]
+        # DNAT rules require destinationAddress to be the firewall's OWN public
+        # IP (the address of prod-environment-fw-public-ip). That address is
+        # allocated by Azure and only known after the public IP exists, so fill
+        # it in once known. Using any other IP makes Azure reject the firewall
+        # with: "DNAT rules uses a destination IP that does not belong to the
+        # firewall". Left disabled so the example deploys cleanly.
+        natRuleCollections: []
+        # natRuleCollections:
+        #   - name: "dnat-web"
+        #     priority: 300
+        #     action: "Dnat"
+        #     rules:
+        #       - name: "web-in"
+        #         protocols: ["TCP"]
+        #         sourceAddresses: ["*"]
+        #         destinationAddress: "<firewall-public-ip-address>"
+        #         destinationPorts: ["80"]
+        #         translatedAddress: "10.0.1.10"
+        #         translatedPort: "8080"
+
+    # Classic model (attached directly to the firewall).
+    # Note: Azure does not allow classic rule collections together with a
+    # firewall policy on the same firewall - use one model or the other.
+    applicationRuleCollections: []
+    networkRuleCollections: []
+    natRuleCollections: []

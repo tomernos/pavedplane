@@ -1,0 +1,111 @@
+apiVersion: platform.example.io/v1alpha1
+kind: XPlatformFrontDoorV3
+metadata:
+  # Front Door name must be globally unique (becomes <name>-frontdoor.azurefd.net)
+  name: prod-fd
+spec:
+  crossplane:
+    compositionRef:
+      name: azure-frontdoor-v3-stack
+  parameters:
+    location: "West Europe" # only used for the resource group; Front Door is global
+    # Deploy into an existing resource group instead of creating one:
+    # resourceGroupNameRef:
+    #   name: prod-environment-rg
+    tags:
+      environment: "production"
+      managed-by: "crossplane"
+    friendlyName: "prod-frontdoor"
+    loadBalancerEnabled: true
+    enforceBackendPoolsCertificateNameCheck: false
+    backendPoolsSendReceiveTimeoutSeconds: 60
+
+    frontendEndpoints:
+      - name: "default-frontend"
+        hostName: "prod-fd-frontdoor.azurefd.net"
+        sessionAffinityEnabled: false
+
+    backendPoolHealthProbes:
+      - name: "health-probe-1"
+        path: "/healthz"
+        protocol: "Https"
+        probeMethod: "HEAD"
+        intervalInSeconds: 30
+
+    backendPoolLoadBalancings:
+      - name: "load-balancing-1"
+        sampleSize: 4
+        successfulSamplesRequired: 2
+
+    backendPools:
+      - name: "web-pool"
+        healthProbeName: "health-probe-1"
+        loadBalancingName: "load-balancing-1"
+        backends:
+          - address: "app.ezpost.com"
+            hostHeader: "app.ezpost.com"
+            httpPort: 80
+            httpsPort: 443
+            priority: 1
+            weight: 50
+
+    routingRules:
+      - name: "https-forward"
+        acceptedProtocols: ["Https"]
+        patternsToMatch: ["/*"]
+        frontendEndpoints: ["default-frontend"]
+        forwarding:
+          backendPoolName: "web-pool"
+          forwardingProtocol: "HttpsOnly"
+          cacheEnabled: false
+      - name: "http-to-https"
+        acceptedProtocols: ["Http"]
+        patternsToMatch: ["/*"]
+        frontendEndpoints: ["default-frontend"]
+        redirect:
+          redirectType: "Moved"
+          redirectProtocol: "HttpsOnly"
+
+    # Requires the frontend endpoint to exist first - fill in the real ID
+    # after the FrontDoor is created, or leave the list empty initially.
+    customHttpsConfigurations: []
+    # Example:
+    # - name: "default-frontend-https"
+    #   frontendEndpointId: "/subscriptions/<sub-id>/resourceGroups/prod-fd-rg/providers/Microsoft.Network/frontDoors/prod-fd-frontdoor/frontendEndpoints/default-frontend"
+    #   enabled: true
+    #   certificateSource: "FrontDoor"
+
+    firewallPolicies:
+      - name: "waf-policy"
+        enabled: true
+        mode: "Prevention"
+        redirectUrl: "https://ezpost.com/blocked"
+        customBlockResponseStatusCode: 403
+        customRules:
+          - name: "rate-limit-api"
+            priority: 1
+            type: "RateLimitRule"
+            action: "Block"
+            rateLimitDurationInMinutes: 1
+            rateLimitThreshold: 100
+            matchConditions:
+              - matchVariable: "RequestUri"
+                operator: "Contains"
+                matchValues: ["/api/"]
+        managedRules:
+          - type: "DefaultRuleSet"
+            version: "1.0"
+
+    rulesEngines:
+      - name: "security-headers"
+        rules:
+          - name: "add-security-headers"
+            priority: 1
+            matchConditions:
+              - variable: "RequestPath"
+                operator: "BeginsWith"
+                values: ["/"]
+            responseHeaderActions:
+              - headerActionType: "Overwrite"
+                headerName: "X-Frame-Options"
+                value: "DENY"

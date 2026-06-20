@@ -1,0 +1,276 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: azure-loadbalancer-v3-stack
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.io/v1alpha1
+    kind: XPlatformLoadBalancerV3
+  mode: Pipeline
+  pipeline:
+    - step: go-templates
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotmpl.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $params := .observed.composite.resource.spec.parameters }}
+            {{- $name := .observed.composite.resource.metadata.name }}
+            {{- $rg := printf "%s-rg" $name }}
+            {{- if $params.resourceGroupNameRef }}
+            {{- $rg = $params.resourceGroupNameRef.name }}
+            {{- end }}
+            {{- if not $params.resourceGroupNameRef }}
+            ---
+            apiVersion: azure.m.upbound.io/v1beta1
+            kind: ResourceGroup
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: rg
+              name: {{ $rg }}
+              namespace: default
+            spec:
+              forProvider:
+                location: {{ $params.location }}
+                {{- if $params.tags }}
+                tags: {{ $params.tags | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: LoadBalancer
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: lb
+              name: {{ .observed.composite.resource.metadata.name }}-lb
+              namespace: default
+            spec:
+              forProvider:
+                location: {{ .observed.composite.resource.spec.parameters.location }}
+                resourceGroupNameRef:
+                  name: {{ $rg }}
+                sku: {{ .observed.composite.resource.spec.parameters.sku }}
+                {{- if .observed.composite.resource.spec.parameters.frontendIPConfigurations }}
+                frontendIpConfiguration:
+                {{- range .observed.composite.resource.spec.parameters.frontendIPConfigurations }}
+                - name: {{ .name }}
+                  {{- if .publicIPId }}
+                  publicIpAddressId: {{ .publicIPId }}
+                  {{- else if .publicIPRef }}
+                  publicIpAddressIdRef:
+                    name: {{ .publicIPRef }}
+                  {{- end }}
+                  {{- if .privateIPAddress }}
+                  privateIpAddress: {{ .privateIPAddress }}
+                  {{- end }}
+                  {{- if .subnetId }}
+                  subnetId: {{ .subnetId }}
+                  {{- else if .subnetRef }}
+                  subnetIdRef:
+                    name: {{ .subnetRef }}
+                  {{- end }}
+                {{- end }}
+                {{- end }}
+                {{- if .observed.composite.resource.spec.parameters.tags }}
+                tags: {{ .observed.composite.resource.spec.parameters.tags | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+
+            {{- range .observed.composite.resource.spec.parameters.backendAddressPools }}
+            {{- $pool := . }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: LoadBalancerBackendAddressPool
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-backendpool
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                loadbalancerIdRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-lb
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+
+            {{- range .addresses }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: LoadBalancerBackendAddressPoolAddress
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-address
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                backendAddressPoolIdRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-{{ $pool.name }}
+                ipAddress: {{ .ipAddress }}
+                {{- if .virtualNetworkId }}
+                virtualNetworkId: {{ .virtualNetworkId }}
+                {{- else if .virtualNetworkRef }}
+                virtualNetworkIdRef:
+                  name: {{ .virtualNetworkRef }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+            {{- end }}
+
+            {{- range .observed.composite.resource.spec.parameters.probes }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: LoadBalancerProbe
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-probe
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                loadbalancerIdRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-lb
+                port: {{ .port }}
+                protocol: {{ .protocol }}
+                {{- if .requestPath }}
+                requestPath: {{ .requestPath }}
+                {{- end }}
+                {{- if .intervalInSeconds }}
+                intervalInSeconds: {{ .intervalInSeconds }}
+                {{- end }}
+                {{- if .numberOfProbes }}
+                numberOfProbes: {{ .numberOfProbes }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range .observed.composite.resource.spec.parameters.rules }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: LoadBalancerRule
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-rule
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                loadbalancerIdRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-lb
+                protocol: {{ .protocol }}
+                frontendPort: {{ .frontendPort }}
+                backendPort: {{ .backendPort }}
+                frontendIpConfigurationName: {{ .frontendIPConfigurationName }}
+                {{- if .backendAddressPoolNames }}
+                backendAddressPoolIdRefs:
+                {{- range .backendAddressPoolNames }}
+                - name: {{ $.observed.composite.resource.metadata.name }}-{{ . }}
+                {{- end }}
+                {{- end }}
+                {{- if .probeName }}
+                probeIdRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-{{ .probeName }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range .observed.composite.resource.spec.parameters.natPools }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: LoadBalancerNatPool
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-natpool
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                loadbalancerIdRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-lb
+                protocol: {{ .protocol }}
+                frontendPortStart: {{ .frontendPortStart }}
+                frontendPortEnd: {{ .frontendPortEnd }}
+                backendPort: {{ .backendPort }}
+                frontendIpConfigurationName: {{ .frontendIPConfigurationName }}
+                resourceGroupNameRef:
+                  name: {{ $rg }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range .observed.composite.resource.spec.parameters.natRules }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: LoadBalancerNatRule
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-natrule
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                loadbalancerIdRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-lb
+                protocol: {{ .protocol }}
+                frontendPort: {{ .frontendPort }}
+                backendPort: {{ .backendPort }}
+                frontendIpConfigurationName: {{ .frontendIPConfigurationName }}
+                resourceGroupNameRef:
+                  name: {{ $rg }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range .observed.composite.resource.spec.parameters.outboundRules }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: LoadBalancerOutboundRule
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-outboundrule
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                loadbalancerIdRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-lb
+                protocol: {{ .protocol }}
+                backendAddressPoolIdRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-{{ .backendAddressPoolName }}
+                {{- if .frontendIPConfigurationNames }}
+                frontendIpConfiguration:
+                {{- range .frontendIPConfigurationNames }}
+                - name: {{ . }}
+                {{- end }}
+                {{- end }}
+                {{- if .allocatedOutboundPorts }}
+                allocatedOutboundPorts: {{ .allocatedOutboundPorts }}
+                {{- end }}
+                {{- if .idleTimeoutInMinutes }}
+                idleTimeoutInMinutes: {{ .idleTimeoutInMinutes }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+    
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

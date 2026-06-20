@@ -1,0 +1,500 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: azure-network-v3-stack
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.io/v1alpha1
+    kind: XPlatformNetworkV3
+  mode: Pipeline
+  pipeline:
+    - step: go-templates
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotmpl.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            ---
+            apiVersion: azure.m.upbound.io/v1beta1
+            kind: ResourceGroup
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: rg
+              name: {{ .observed.composite.resource.metadata.name }}-rg
+              namespace: default
+            spec:
+              forProvider:
+                location: {{ .observed.composite.resource.spec.parameters.location }}
+                {{- if .observed.composite.resource.spec.parameters.tags }}
+                tags: {{ .observed.composite.resource.spec.parameters.tags | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: VirtualNetwork
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: vnet
+              name: {{ .observed.composite.resource.metadata.name }}-vnet
+              namespace: default
+            spec:
+              forProvider:
+                location: {{ .observed.composite.resource.spec.parameters.location }}
+                addressSpace:
+                  - {{ .observed.composite.resource.spec.parameters.vnetCIDR }}
+                resourceGroupNameRef:
+                  name: {{ .observed.composite.resource.metadata.name }}-rg
+                {{- if .observed.composite.resource.spec.parameters.tags }}
+                tags: {{ .observed.composite.resource.spec.parameters.tags | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            
+            {{- range .observed.composite.resource.spec.parameters.subnets }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: Subnet
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-subnet
+                {{- if .azureName }}
+                crossplane.io/external-name: {{ .azureName }}
+                {{- end }}
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                addressPrefixes:
+                  - {{ .cidr }}
+                resourceGroupNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-rg
+                virtualNetworkNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-vnet
+                # Subnets do not support tags in this provider
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range .observed.composite.resource.spec.parameters.securityGroups }}
+            {{- $nsg := . }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: SecurityGroup
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-nsg
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                location: {{ $.observed.composite.resource.spec.parameters.location }}
+                resourceGroupNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-rg
+                {{- if .tags }}
+                tags: {{ .tags | toJson }}
+                {{- else if $.observed.composite.resource.spec.parameters.tags }}
+                tags: {{ $.observed.composite.resource.spec.parameters.tags | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+
+            {{- range $nsg.rules }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: SecurityRule
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ $nsg.name }}-{{ .name }}-rule
+                crossplane.io/external-name: {{ .name | quote }}
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ $nsg.name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                networkSecurityGroupNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-{{ $nsg.name }}
+                resourceGroupNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-rg
+                priority: {{ .priority }}
+                direction: {{ .direction }}
+                access: {{ .access }}
+                protocol: {{ .protocol | quote }}
+                {{- if .description }}
+                description: {{ .description | quote }}
+                {{- end }}
+                {{- if .sourcePortRange }}
+                sourcePortRange: {{ .sourcePortRange | quote }}
+                {{- end }}
+                {{- if .sourcePortRanges }}
+                sourcePortRanges: {{ .sourcePortRanges | toJson }}
+                {{- end }}
+                {{- if .destinationPortRange }}
+                destinationPortRange: {{ .destinationPortRange | quote }}
+                {{- end }}
+                {{- if .destinationPortRanges }}
+                destinationPortRanges: {{ .destinationPortRanges | toJson }}
+                {{- end }}
+                {{- if .sourceAddressPrefix }}
+                sourceAddressPrefix: {{ .sourceAddressPrefix | quote }}
+                {{- end }}
+                {{- if .sourceAddressPrefixes }}
+                sourceAddressPrefixes: {{ .sourceAddressPrefixes | toJson }}
+                {{- end }}
+                {{- if .destinationAddressPrefix }}
+                destinationAddressPrefix: {{ .destinationAddressPrefix | quote }}
+                {{- end }}
+                {{- if .destinationAddressPrefixes }}
+                destinationAddressPrefixes: {{ .destinationAddressPrefixes | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range $nsg.subnets }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: SubnetNetworkSecurityGroupAssociation
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ $nsg.name }}-{{ . }}-nsg-assoc
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ $nsg.name }}-{{ . }}-assoc
+              namespace: default
+            spec:
+              forProvider:
+                subnetIdRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-{{ . }}
+                networkSecurityGroupIdRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-{{ $nsg.name }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+            {{- end }}
+
+            {{- range .observed.composite.resource.spec.parameters.publicIPs }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: PublicIP
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-publicip
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                allocationMethod: Static
+                location: {{ $.observed.composite.resource.spec.parameters.location }}
+                resourceGroupNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-rg
+                # Azure Firewall requires a Standard (not StandardV2) public IP.
+                sku: {{ .sku | default "StandardV2" }}
+                {{- if .tags }}
+                tags: {{ .tags | toJson }}
+                {{- else if $.observed.composite.resource.spec.parameters.tags }}
+                tags: {{ $.observed.composite.resource.spec.parameters.tags | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range .observed.composite.resource.spec.parameters.natGateways }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: NATGateway
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-natgw
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                idleTimeoutInMinutes: 10
+                location: {{ $.observed.composite.resource.spec.parameters.location }}
+                resourceGroupNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-rg
+                skuName: StandardV2
+                {{- if .tags }}
+                tags: {{ .tags | toJson }}
+                {{- else if $.observed.composite.resource.spec.parameters.tags }}
+                tags: {{ $.observed.composite.resource.spec.parameters.tags | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: SubnetNATGatewayAssociation
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-natgw-subnet-assoc
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ .name }}-subnet-assoc
+              namespace: default
+            spec:
+              forProvider:
+                natGatewayIdRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-{{ .name }}
+                subnetIdRef: 
+                  name: {{ $.observed.composite.resource.metadata.name }}-{{ .subnetName }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: NATGatewayPublicIPAssociation
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-natgw-ip-assoc
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ .name }}-ip-assoc
+              namespace: default
+            spec:
+              forProvider:
+                natGatewayIdRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-{{ .name }}
+                publicIpAddressIdRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-{{ .publicIpName }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range .observed.composite.resource.spec.parameters.dnsZones }}
+            {{- $zone := . }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: PrivateDNSZone
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name | replace "." "-" }}-dnszone
+              name: {{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                resourceGroupNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-rg
+                {{- if .tags }}
+                tags: {{ .tags | toJson }}
+                {{- else if $.observed.composite.resource.spec.parameters.tags }}
+                tags: {{ $.observed.composite.resource.spec.parameters.tags | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: PrivateDNSZoneVirtualNetworkLink
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name | replace "." "-" }}-vnet-link
+              name: {{ $.observed.composite.resource.metadata.name }}-{{ .name | replace "." "-" }}-vnet-link
+              namespace: default
+            spec:
+              forProvider:
+                privateDnsZoneNameRef:
+                  name: {{ .name }}
+                resourceGroupNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-rg
+                virtualNetworkIdRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-vnet
+                {{- if .tags }}
+                tags: {{ .tags | toJson }}
+                {{- else if $.observed.composite.resource.spec.parameters.tags }}
+                tags: {{ $.observed.composite.resource.spec.parameters.tags | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+
+            {{- range $zone.aRecords }}
+            {{- $recordSlug := printf "%s-%s-a" ($zone.name | replace "." "-") (.name | replace "." "-" | replace "_" "-" | replace "@" "apex") }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: PrivateDNSARecord
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ $recordSlug }}
+                crossplane.io/external-name: {{ .name | quote }}
+              name: {{ $recordSlug }}
+              namespace: default
+            spec:
+              forProvider:
+                zoneNameRef:
+                  name: {{ $zone.name }}
+                resourceGroupNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-rg
+                ttl: {{ .ttl | default 300 }}
+                records: {{ .records | toJson }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range $zone.aaaaRecords }}
+            {{- $recordSlug := printf "%s-%s-aaaa" ($zone.name | replace "." "-") (.name | replace "." "-" | replace "_" "-" | replace "@" "apex") }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: PrivateDNSAAAARecord
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ $recordSlug }}
+                crossplane.io/external-name: {{ .name | quote }}
+              name: {{ $recordSlug }}
+              namespace: default
+            spec:
+              forProvider:
+                zoneNameRef:
+                  name: {{ $zone.name }}
+                resourceGroupNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-rg
+                ttl: {{ .ttl | default 300 }}
+                records: {{ .records | toJson }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range $zone.cnameRecords }}
+            {{- $recordSlug := printf "%s-%s-cname" ($zone.name | replace "." "-") (.name | replace "." "-" | replace "_" "-" | replace "@" "apex") }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: PrivateDNSCNAMERecord
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ $recordSlug }}
+                crossplane.io/external-name: {{ .name | quote }}
+              name: {{ $recordSlug }}
+              namespace: default
+            spec:
+              forProvider:
+                zoneNameRef:
+                  name: {{ $zone.name }}
+                resourceGroupNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-rg
+                ttl: {{ .ttl | default 300 }}
+                record: {{ .record }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range $zone.mxRecords }}
+            {{- $recordSlug := printf "%s-%s-mx" ($zone.name | replace "." "-") (.name | default "@" | replace "." "-" | replace "_" "-" | replace "@" "apex") }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: PrivateDNSMXRecord
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ $recordSlug }}
+                crossplane.io/external-name: {{ .name | default "@" | quote }}
+              name: {{ $recordSlug }}
+              namespace: default
+            spec:
+              forProvider:
+                zoneNameRef:
+                  name: {{ $zone.name }}
+                resourceGroupNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-rg
+                ttl: {{ .ttl | default 300 }}
+                record:
+                {{- range .records }}
+                - preference: {{ .preference }}
+                  exchange: {{ .exchange }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range $zone.ptrRecords }}
+            {{- $recordSlug := printf "%s-%s-ptr" ($zone.name | replace "." "-") (.name | replace "." "-" | replace "_" "-" | replace "@" "apex") }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: PrivateDNSPTRRecord
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ $recordSlug }}
+                crossplane.io/external-name: {{ .name | quote }}
+              name: {{ $recordSlug }}
+              namespace: default
+            spec:
+              forProvider:
+                zoneNameRef:
+                  name: {{ $zone.name }}
+                resourceGroupNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-rg
+                ttl: {{ .ttl | default 300 }}
+                records: {{ .records | toJson }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range $zone.srvRecords }}
+            {{- $recordSlug := printf "%s-%s-srv" ($zone.name | replace "." "-") (.name | replace "." "-" | replace "_" "-" | replace "@" "apex") }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: PrivateDNSSRVRecord
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ $recordSlug }}
+                crossplane.io/external-name: {{ .name | quote }}
+              name: {{ $recordSlug }}
+              namespace: default
+            spec:
+              forProvider:
+                zoneNameRef:
+                  name: {{ $zone.name }}
+                resourceGroupNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-rg
+                ttl: {{ .ttl | default 300 }}
+                record:
+                {{- range .records }}
+                - priority: {{ .priority }}
+                  weight: {{ .weight }}
+                  port: {{ .port }}
+                  target: {{ .target }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range $zone.txtRecords }}
+            {{- $recordSlug := printf "%s-%s-txt" ($zone.name | replace "." "-") (.name | replace "." "-" | replace "_" "-" | replace "@" "apex") }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: PrivateDNSTXTRecord
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ $recordSlug }}
+                crossplane.io/external-name: {{ .name | quote }}
+              name: {{ $recordSlug }}
+              namespace: default
+            spec:
+              forProvider:
+                zoneNameRef:
+                  name: {{ $zone.name }}
+                resourceGroupNameRef:
+                  name: {{ $.observed.composite.resource.metadata.name }}-rg
+                ttl: {{ .ttl | default 300 }}
+                record:
+                {{- range .records }}
+                - value: {{ . | quote }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+            {{- end }}
+
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

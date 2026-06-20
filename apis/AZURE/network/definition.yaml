@@ -1,0 +1,224 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xplatformnetworkv3s.platform.example.io
+spec:
+  group: platform.example.io
+  names:
+    kind: XPlatformNetworkV3
+    plural: xplatformnetworkv3s
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              crossplane:
+                type: object
+                properties:
+                  compositionRef:
+                    type: object
+                    properties:
+                      name: {type: string}
+              parameters:
+                type: object
+                properties:
+                  location: {type: string, default: "West Europe"}
+                  vnetCIDR: {type: string, default: "10.0.0.0/16"}
+                  tags:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  subnets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        cidr: {type: string}
+                        # Optional explicit Azure subnet name (set as the
+                        # external-name). Use for names that aren't valid
+                        # Kubernetes object names or are fixed by Azure, e.g.
+                        # "AzureFirewallSubnet". Defaults to the prefixed object name.
+                        azureName: {type: string}
+                        tags:
+                          type: object
+                          additionalProperties:
+                            type: string
+                      required: [name, cidr]
+                  securityGroups:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        tags:
+                          type: object
+                          additionalProperties:
+                            type: string
+                        # names of subnets (from .subnets above) to attach this NSG to
+                        subnets:
+                          type: array
+                          items: {type: string}
+                        rules:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              priority: {type: integer}
+                              direction: {type: string, default: "Inbound"}
+                              access: {type: string, default: "Allow"}
+                              protocol: {type: string, default: "Tcp"}
+                              description: {type: string}
+                              sourcePortRange: {type: string}
+                              sourcePortRanges:
+                                type: array
+                                items: {type: string}
+                              destinationPortRange: {type: string}
+                              destinationPortRanges:
+                                type: array
+                                items: {type: string}
+                              sourceAddressPrefix: {type: string}
+                              sourceAddressPrefixes:
+                                type: array
+                                items: {type: string}
+                              destinationAddressPrefix: {type: string}
+                              destinationAddressPrefixes:
+                                type: array
+                                items: {type: string}
+                            required: [name, priority, direction, access, protocol]
+                      required: [name]
+                  publicIPs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        # Public IP SKU: "Basic" or "Standard". Azure Firewall
+                        # requires "Standard". Defaults to "StandardV2".
+                        sku: {type: string}
+                        tags:
+                          type: object
+                          additionalProperties:
+                            type: string
+                      required: [name]
+                  natGateways:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        subnetName: {type: string}
+                        publicIpName: {type: string}
+                        tags:
+                          type: object
+                          additionalProperties:
+                            type: string
+                      required: [name, subnetName, publicIpName]
+                  dnsZones:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        tags:
+                          type: object
+                          additionalProperties:
+                            type: string
+                        aRecords:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              ttl: {type: integer, default: 300}
+                              records:
+                                type: array
+                                items: {type: string}
+                            required: [name, records]
+                        aaaaRecords:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              ttl: {type: integer, default: 300}
+                              records:
+                                type: array
+                                items: {type: string}
+                            required: [name, records]
+                        cnameRecords:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              ttl: {type: integer, default: 300}
+                              record: {type: string}
+                            required: [name, record]
+                        mxRecords:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string, default: "@"}
+                              ttl: {type: integer, default: 300}
+                              records:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    preference: {type: integer}
+                                    exchange: {type: string}
+                                  required: [preference, exchange]
+                            required: [name, records]
+                        ptrRecords:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              ttl: {type: integer, default: 300}
+                              records:
+                                type: array
+                                items: {type: string}
+                            required: [name, records]
+                        srvRecords:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              ttl: {type: integer, default: 300}
+                              records:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    priority: {type: integer}
+                                    weight: {type: integer}
+                                    port: {type: integer}
+                                    target: {type: string}
+                                  required: [priority, weight, port, target]
+                            required: [name, records]
+                        txtRecords:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              ttl: {type: integer, default: 300}
+                              records:
+                                type: array
+                                items: {type: string}
+                            required: [name, records]
+                      required: [name]
+                required: [location]
+            required: [parameters]

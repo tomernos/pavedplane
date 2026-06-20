@@ -1,0 +1,254 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xplatformfrontdoorv3s.platform.example.io
+spec:
+  group: platform.example.io
+  names:
+    kind: XPlatformFrontDoorV3
+    plural: xplatformfrontdoorv3s
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              crossplane:
+                type: object
+                properties:
+                  compositionRef:
+                    type: object
+                    properties:
+                      name: {type: string}
+              parameters:
+                type: object
+                properties:
+                  # Location is only used for the resource group; Front Door itself is global
+                  location: {type: string, default: "West Europe"}
+                  # Reference an existing ResourceGroup (Kubernetes object name).
+                  # When set, no ResourceGroup is created by this composite.
+                  resourceGroupNameRef:
+                    type: object
+                    properties:
+                      name: {type: string}
+                    required: [name]
+                  tags:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  friendlyName: {type: string}
+                  loadBalancerEnabled: {type: boolean, default: true}
+                  enforceBackendPoolsCertificateNameCheck: {type: boolean, default: false}
+                  backendPoolsSendReceiveTimeoutSeconds: {type: integer}
+                  frontendEndpoints:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        hostName: {type: string}
+                        sessionAffinityEnabled: {type: boolean}
+                        sessionAffinityTtlSeconds: {type: integer}
+                      required: [name, hostName]
+                  backendPoolHealthProbes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        path: {type: string, default: "/"}
+                        protocol: {type: string, default: "Https"}
+                        probeMethod: {type: string, default: "GET"}
+                        intervalInSeconds: {type: integer}
+                        enabled: {type: boolean}
+                      required: [name]
+                  backendPoolLoadBalancings:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        sampleSize: {type: integer}
+                        successfulSamplesRequired: {type: integer}
+                        additionalLatencyMilliseconds: {type: integer}
+                      required: [name]
+                  backendPools:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        healthProbeName: {type: string}
+                        loadBalancingName: {type: string}
+                        backends:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              address: {type: string}
+                              hostHeader: {type: string}
+                              httpPort: {type: integer, default: 80}
+                              httpsPort: {type: integer, default: 443}
+                              priority: {type: integer}
+                              weight: {type: integer}
+                              enabled: {type: boolean}
+                            required: [address, hostHeader]
+                      required: [name, healthProbeName, loadBalancingName]
+                  routingRules:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        acceptedProtocols:
+                          type: array
+                          items: {type: string}
+                        patternsToMatch:
+                          type: array
+                          items: {type: string}
+                        frontendEndpoints:
+                          type: array
+                          items: {type: string}
+                        enabled: {type: boolean}
+                        forwarding:
+                          type: object
+                          properties:
+                            backendPoolName: {type: string}
+                            forwardingProtocol: {type: string, default: "HttpsOnly"}
+                            cacheEnabled: {type: boolean}
+                            cacheQueryParameterStripDirective: {type: string}
+                            customForwardingPath: {type: string}
+                          required: [backendPoolName]
+                        redirect:
+                          type: object
+                          properties:
+                            redirectType: {type: string, default: "Found"}
+                            redirectProtocol: {type: string, default: "MatchRequest"}
+                            customHost: {type: string}
+                            customPath: {type: string}
+                            customQueryString: {type: string}
+                            customFragment: {type: string}
+                      required: [name, acceptedProtocols, patternsToMatch, frontendEndpoints]
+                  # FrontdoorCustomHTTPSConfiguration - one per frontend endpoint to manage
+                  customHttpsConfigurations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        # full Azure resource ID of the frontend endpoint
+                        frontendEndpointId: {type: string}
+                        enabled: {type: boolean, default: true}
+                        certificateSource: {type: string, default: "FrontDoor"}
+                        azureKeyVaultCertificateSecretName: {type: string}
+                        azureKeyVaultCertificateSecretVersion: {type: string}
+                        azureKeyVaultCertificateVaultId: {type: string}
+                      required: [name, frontendEndpointId]
+                  # FrontdoorFirewallPolicy (WAF) resources
+                  firewallPolicies:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        enabled: {type: boolean, default: true}
+                        mode: {type: string, default: "Prevention"}
+                        redirectUrl: {type: string}
+                        customBlockResponseStatusCode: {type: integer}
+                        customBlockResponseBody: {type: string}
+                        customRules:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              priority: {type: integer}
+                              type: {type: string, default: "MatchRule"}
+                              action: {type: string, default: "Block"}
+                              enabled: {type: boolean}
+                              rateLimitDurationInMinutes: {type: integer}
+                              rateLimitThreshold: {type: integer}
+                              matchConditions:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    matchVariable: {type: string}
+                                    operator: {type: string}
+                                    negationCondition: {type: boolean}
+                                    selector: {type: string}
+                                    matchValues:
+                                      type: array
+                                      items: {type: string}
+                                    transforms:
+                                      type: array
+                                      items: {type: string}
+                                  required: [matchVariable, operator, matchValues]
+                            required: [name, priority, action]
+                        managedRules:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              type: {type: string}
+                              version: {type: string}
+                            required: [type, version]
+                      required: [name]
+                  # FrontdoorRulesEngine resources
+                  rulesEngines:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        rules:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              priority: {type: integer}
+                              matchConditions:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    variable: {type: string}
+                                    operator: {type: string}
+                                    negateCondition: {type: boolean}
+                                    selector: {type: string}
+                                    values:
+                                      type: array
+                                      items: {type: string}
+                                    transforms:
+                                      type: array
+                                      items: {type: string}
+                                  required: [operator]
+                              requestHeaderActions:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    headerActionType: {type: string}
+                                    headerName: {type: string}
+                                    value: {type: string}
+                                  required: [headerActionType, headerName]
+                              responseHeaderActions:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    headerActionType: {type: string}
+                                    headerName: {type: string}
+                                    value: {type: string}
+                                  required: [headerActionType, headerName]
+                            required: [name, priority]
+                      required: [name]
+                required: [location]
+            required: [parameters]

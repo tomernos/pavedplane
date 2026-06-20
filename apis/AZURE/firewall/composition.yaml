@@ -1,0 +1,368 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: azure-firewall-v3-stack
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.io/v1alpha1
+    kind: XPlatformFirewallV3
+  mode: Pipeline
+  pipeline:
+    - step: go-templates
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotmpl.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $params := .observed.composite.resource.spec.parameters }}
+            {{- $name := .observed.composite.resource.metadata.name }}
+            {{- $rg := printf "%s-rg" $name }}
+            {{- if $params.resourceGroupNameRef }}
+            {{- $rg = $params.resourceGroupNameRef.name }}
+            {{- end }}
+            {{- if not $params.resourceGroupNameRef }}
+            ---
+            apiVersion: azure.m.upbound.io/v1beta1
+            kind: ResourceGroup
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: rg
+              name: {{ $rg }}
+              namespace: default
+            spec:
+              forProvider:
+                location: {{ $params.location }}
+                {{- if $params.tags }}
+                tags: {{ $params.tags | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- if and $params.policy $params.policy.enabled }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: FirewallPolicy
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: fwpolicy
+              name: {{ $name }}-fwpolicy
+              namespace: default
+            spec:
+              forProvider:
+                location: {{ $params.location }}
+                resourceGroupNameRef:
+                  name: {{ $rg }}
+                sku: {{ $params.policy.sku | default "Standard" }}
+                {{- if $params.policy.threatIntelligenceMode }}
+                threatIntelligenceMode: {{ $params.policy.threatIntelligenceMode }}
+                {{- end }}
+                {{- if or $params.policy.dnsProxyEnabled $params.policy.dnsServers }}
+                dns:
+                  {{- if $params.policy.dnsProxyEnabled }}
+                  proxyEnabled: {{ $params.policy.dnsProxyEnabled }}
+                  {{- end }}
+                  {{- if $params.policy.dnsServers }}
+                  servers: {{ $params.policy.dnsServers | toJson }}
+                  {{- end }}
+                {{- end }}
+                {{- if $params.tags }}
+                tags: {{ $params.tags | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range $params.policyRuleCollectionGroups }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: FirewallPolicyRuleCollectionGroup
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-rcg
+              name: {{ $name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                firewallPolicyIdRef:
+                  name: {{ $name }}-fwpolicy
+                priority: {{ .priority }}
+                {{- if .applicationRuleCollections }}
+                applicationRuleCollection:
+                {{- range .applicationRuleCollections }}
+                - name: {{ .name }}
+                  priority: {{ .priority }}
+                  action: {{ .action }}
+                  {{- if .rules }}
+                  rule:
+                  {{- range .rules }}
+                  - name: {{ .name }}
+                    {{- if .protocols }}
+                    protocols:
+                    {{- range .protocols }}
+                    - type: {{ .type }}
+                      port: {{ .port }}
+                    {{- end }}
+                    {{- end }}
+                    {{- if .sourceAddresses }}
+                    sourceAddresses: {{ .sourceAddresses | toJson }}
+                    {{- end }}
+                    {{- if .destinationFqdns }}
+                    destinationFqdns: {{ .destinationFqdns | toJson }}
+                    {{- end }}
+                  {{- end }}
+                  {{- end }}
+                {{- end }}
+                {{- end }}
+                {{- if .networkRuleCollections }}
+                networkRuleCollection:
+                {{- range .networkRuleCollections }}
+                - name: {{ .name }}
+                  priority: {{ .priority }}
+                  action: {{ .action }}
+                  {{- if .rules }}
+                  rule:
+                  {{- range .rules }}
+                  - name: {{ .name }}
+                    {{- if .protocols }}
+                    protocols: {{ .protocols | toJson }}
+                    {{- end }}
+                    {{- if .sourceAddresses }}
+                    sourceAddresses: {{ .sourceAddresses | toJson }}
+                    {{- end }}
+                    {{- if .destinationAddresses }}
+                    destinationAddresses: {{ .destinationAddresses | toJson }}
+                    {{- end }}
+                    {{- if .destinationPorts }}
+                    destinationPorts: {{ .destinationPorts | toJson }}
+                    {{- end }}
+                  {{- end }}
+                  {{- end }}
+                {{- end }}
+                {{- end }}
+                {{- if .natRuleCollections }}
+                natRuleCollection:
+                {{- range .natRuleCollections }}
+                - name: {{ .name }}
+                  priority: {{ .priority }}
+                  action: {{ .action }}
+                  {{- if .rules }}
+                  rule:
+                  {{- range .rules }}
+                  - name: {{ .name }}
+                    {{- if .protocols }}
+                    protocols: {{ .protocols | toJson }}
+                    {{- end }}
+                    {{- if .sourceAddresses }}
+                    sourceAddresses: {{ .sourceAddresses | toJson }}
+                    {{- end }}
+                    {{- if .destinationAddress }}
+                    destinationAddress: {{ .destinationAddress }}
+                    {{- end }}
+                    {{- if .destinationPorts }}
+                    destinationPorts: {{ .destinationPorts | toJson }}
+                    {{- end }}
+                    {{- if .translatedAddress }}
+                    translatedAddress: {{ .translatedAddress }}
+                    {{- end }}
+                    {{- if .translatedPort }}
+                    # policy group: translatedPort is numeric in the provider schema
+                    translatedPort: {{ .translatedPort | int }}
+                    {{- end }}
+                  {{- end }}
+                  {{- end }}
+                {{- end }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: Firewall
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: firewall
+              name: {{ $name }}-firewall
+              namespace: default
+            spec:
+              forProvider:
+                location: {{ $params.location }}
+                resourceGroupNameRef:
+                  name: {{ $rg }}
+                skuName: {{ $params.skuName }}
+                skuTier: {{ $params.skuTier }}
+                {{- if $params.threatIntelMode }}
+                threatIntelMode: {{ $params.threatIntelMode }}
+                {{- end }}
+                {{- if $params.zones }}
+                zones: {{ $params.zones | toJson }}
+                {{- end }}
+                {{- if and $params.policy $params.policy.enabled }}
+                {{- $polId := dig "fwpolicy" "resource" "status" "atProvider" "id" "" ($.observed.resources | default dict) }}
+                {{- if $polId }}
+                # Firewall has no firewallPolicyIdRef in the provider schema, so we
+                # wire the policy's real Azure ID once the FirewallPolicy is created.
+                firewallPolicyId: {{ $polId }}
+                {{- end }}
+                {{- end }}
+                {{- if $params.ipConfigurations }}
+                ipConfiguration:
+                {{- range $params.ipConfigurations }}
+                - name: {{ .name }}
+                  {{- if .subnetId }}
+                  subnetId: {{ .subnetId }}
+                  {{- else if .subnetRef }}
+                  subnetIdRef:
+                    name: {{ .subnetRef }}
+                  {{- end }}
+                  {{- if .publicIpId }}
+                  publicIpAddressId: {{ .publicIpId }}
+                  {{- else if .publicIpRef }}
+                  publicIpAddressIdRef:
+                    name: {{ .publicIpRef }}
+                  {{- end }}
+                {{- end }}
+                {{- end }}
+                {{- if $params.tags }}
+                tags: {{ $params.tags | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+
+            {{- range $params.applicationRuleCollections }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: FirewallApplicationRuleCollection
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-app-rc
+              name: {{ $name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                azureFirewallNameRef:
+                  name: {{ $name }}-firewall
+                resourceGroupNameRef:
+                  name: {{ $rg }}
+                priority: {{ .priority }}
+                action: {{ .action }}
+                {{- if .rules }}
+                rule:
+                {{- range .rules }}
+                - name: {{ .name }}
+                  {{- if .sourceAddresses }}
+                  sourceAddresses: {{ .sourceAddresses | toJson }}
+                  {{- end }}
+                  {{- if .targetFqdns }}
+                  targetFqdns: {{ .targetFqdns | toJson }}
+                  {{- end }}
+                  {{- if .protocols }}
+                  protocol:
+                  {{- range .protocols }}
+                  - type: {{ .type }}
+                    port: {{ .port }}
+                  {{- end }}
+                  {{- end }}
+                {{- end }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range $params.networkRuleCollections }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: FirewallNetworkRuleCollection
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-net-rc
+              name: {{ $name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                azureFirewallNameRef:
+                  name: {{ $name }}-firewall
+                resourceGroupNameRef:
+                  name: {{ $rg }}
+                priority: {{ .priority }}
+                action: {{ .action }}
+                {{- if .rules }}
+                rule:
+                {{- range .rules }}
+                - name: {{ .name }}
+                  {{- if .protocols }}
+                  protocols: {{ .protocols | toJson }}
+                  {{- end }}
+                  {{- if .sourceAddresses }}
+                  sourceAddresses: {{ .sourceAddresses | toJson }}
+                  {{- end }}
+                  {{- if .destinationAddresses }}
+                  destinationAddresses: {{ .destinationAddresses | toJson }}
+                  {{- end }}
+                  {{- if .destinationPorts }}
+                  destinationPorts: {{ .destinationPorts | toJson }}
+                  {{- end }}
+                {{- end }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range $params.natRuleCollections }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: FirewallNATRuleCollection
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-nat-rc
+              name: {{ $name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                azureFirewallNameRef:
+                  name: {{ $name }}-firewall
+                resourceGroupNameRef:
+                  name: {{ $rg }}
+                priority: {{ .priority }}
+                action: {{ .action }}
+                {{- if .rules }}
+                rule:
+                {{- range .rules }}
+                - name: {{ .name }}
+                  {{- if .protocols }}
+                  protocols: {{ .protocols | toJson }}
+                  {{- end }}
+                  {{- if .sourceAddresses }}
+                  sourceAddresses: {{ .sourceAddresses | toJson }}
+                  {{- end }}
+                  {{- if .destinationAddresses }}
+                  destinationAddresses: {{ .destinationAddresses | toJson }}
+                  {{- end }}
+                  {{- if .destinationPorts }}
+                  destinationPorts: {{ .destinationPorts | toJson }}
+                  {{- end }}
+                  {{- if .translatedAddress }}
+                  translatedAddress: {{ .translatedAddress }}
+                  {{- end }}
+                  {{- if .translatedPort }}
+                  translatedPort: {{ .translatedPort | quote }}
+                  {{- end }}
+                {{- end }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

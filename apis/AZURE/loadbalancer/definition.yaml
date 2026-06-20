@@ -1,0 +1,139 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xplatformloadbalancerv3s.platform.example.io
+spec:
+  group: platform.example.io
+  names:
+    kind: XPlatformLoadBalancerV3
+    plural: xplatformloadbalancerv3s
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              crossplane:
+                type: object
+                properties:
+                  compositionRef:
+                    type: object
+                    properties:
+                      name: {type: string}
+              parameters:
+                type: object
+                properties:
+                  location: {type: string, default: "West Europe"}
+                  # Reference an existing ResourceGroup (Kubernetes object name).
+                  # When set, no ResourceGroup is created by this composite.
+                  resourceGroupNameRef:
+                    type: object
+                    properties:
+                      name: {type: string}
+                    required: [name]
+                  tags:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  sku: {type: string, default: "Standard"}
+                  frontendIPConfigurations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        # ref = Kubernetes object name of an existing PublicIP/Subnet
+                        # (resolved via *IdRef); id = raw Azure resource ID fallback
+                        publicIPRef: {type: string}
+                        publicIPId: {type: string}
+                        subnetRef: {type: string}
+                        subnetId: {type: string}
+                        privateIPAddress: {type: string}
+                      required: [name]
+                  backendAddressPools:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        addresses:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              ipAddress: {type: string}
+                              # ref = Kubernetes object name of an existing
+                              # VirtualNetwork; id = raw Azure resource ID fallback
+                              virtualNetworkRef: {type: string}
+                              virtualNetworkId: {type: string}
+                            required: [name, ipAddress]
+                      required: [name]
+                  probes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        port: {type: integer}
+                        protocol: {type: string, default: "Tcp"}
+                        requestPath: {type: string}
+                        intervalInSeconds: {type: integer}
+                        numberOfProbes: {type: integer}
+                      required: [name, port]
+                  rules:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        protocol: {type: string, default: "Tcp"}
+                        frontendPort: {type: integer}
+                        backendPort: {type: integer}
+                        frontendIPConfigurationName: {type: string}
+                        backendAddressPoolNames: {type: array, items: {type: string}}
+                        probeName: {type: string}
+                      required: [name, protocol, frontendPort, backendPort, frontendIPConfigurationName]
+                  natPools:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        protocol: {type: string, default: "Tcp"}
+                        frontendPortStart: {type: integer}
+                        frontendPortEnd: {type: integer}
+                        backendPort: {type: integer}
+                        frontendIPConfigurationName: {type: string}
+                      required: [name, protocol, frontendPortStart, frontendPortEnd, backendPort, frontendIPConfigurationName]
+                  natRules:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        protocol: {type: string, default: "Tcp"}
+                        frontendPort: {type: integer}
+                        backendPort: {type: integer}
+                        frontendIPConfigurationName: {type: string}
+                      required: [name, protocol, frontendPort, backendPort, frontendIPConfigurationName]
+                  outboundRules:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        protocol: {type: string, default: "Tcp"}
+                        frontendIPConfigurationNames: {type: array, items: {type: string}}
+                        backendAddressPoolName: {type: string}
+                        allocatedOutboundPorts: {type: integer}
+                        idleTimeoutInMinutes: {type: integer}
+                      required: [name, protocol, backendAddressPoolName]
+                required: [location]
+            required: [parameters]

@@ -1,0 +1,363 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: azure-frontdoor-v3-stack
+spec:
+  compositeTypeRef:
+    apiVersion: platform.example.io/v1alpha1
+    kind: XPlatformFrontDoorV3
+  mode: Pipeline
+  pipeline:
+    - step: go-templates
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotmpl.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $params := .observed.composite.resource.spec.parameters }}
+            {{- $name := .observed.composite.resource.metadata.name }}
+            {{- $rg := printf "%s-rg" $name }}
+            {{- if $params.resourceGroupNameRef }}
+            {{- $rg = $params.resourceGroupNameRef.name }}
+            {{- end }}
+            {{- if not $params.resourceGroupNameRef }}
+            ---
+            apiVersion: azure.m.upbound.io/v1beta1
+            kind: ResourceGroup
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: rg
+              name: {{ $rg }}
+              namespace: default
+            spec:
+              forProvider:
+                location: {{ $params.location }}
+                {{- if $params.tags }}
+                tags: {{ $params.tags | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range $params.firewallPolicies }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: FrontdoorFirewallPolicy
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-waf
+              name: {{ $name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                resourceGroupNameRef:
+                  name: {{ $rg }}
+                enabled: {{ .enabled | default true }}
+                mode: {{ .mode | default "Prevention" }}
+                {{- if .redirectUrl }}
+                redirectUrl: {{ .redirectUrl }}
+                {{- end }}
+                {{- if .customBlockResponseStatusCode }}
+                customBlockResponseStatusCode: {{ .customBlockResponseStatusCode }}
+                {{- end }}
+                {{- if .customBlockResponseBody }}
+                customBlockResponseBody: {{ .customBlockResponseBody }}
+                {{- end }}
+                {{- if .customRules }}
+                customRule:
+                {{- range .customRules }}
+                - name: {{ .name }}
+                  priority: {{ .priority }}
+                  type: {{ .type | default "MatchRule" }}
+                  action: {{ .action }}
+                  {{- if hasKey . "enabled" }}
+                  enabled: {{ .enabled }}
+                  {{- end }}
+                  {{- if .rateLimitDurationInMinutes }}
+                  rateLimitDurationInMinutes: {{ .rateLimitDurationInMinutes }}
+                  {{- end }}
+                  {{- if .rateLimitThreshold }}
+                  rateLimitThreshold: {{ .rateLimitThreshold }}
+                  {{- end }}
+                  {{- if .matchConditions }}
+                  matchCondition:
+                  {{- range .matchConditions }}
+                  - matchVariable: {{ .matchVariable }}
+                    operator: {{ .operator }}
+                    matchValues: {{ .matchValues | toJson }}
+                    {{- if hasKey . "negationCondition" }}
+                    negationCondition: {{ .negationCondition }}
+                    {{- end }}
+                    {{- if .selector }}
+                    selector: {{ .selector }}
+                    {{- end }}
+                    {{- if .transforms }}
+                    transforms: {{ .transforms | toJson }}
+                    {{- end }}
+                  {{- end }}
+                  {{- end }}
+                {{- end }}
+                {{- end }}
+                {{- if .managedRules }}
+                managedRule:
+                {{- range .managedRules }}
+                - type: {{ .type }}
+                  version: {{ .version | quote }}
+                {{- end }}
+                {{- end }}
+                {{- if $params.tags }}
+                tags: {{ $params.tags | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: FrontDoor
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: frontdoor
+              name: {{ $name }}-frontdoor
+              namespace: default
+            spec:
+              forProvider:
+                resourceGroupNameRef:
+                  name: {{ $rg }}
+                {{- if $params.friendlyName }}
+                friendlyName: {{ $params.friendlyName }}
+                {{- end }}
+                loadBalancerEnabled: {{ $params.loadBalancerEnabled | default true }}
+                backendPoolSettings:
+                - enforceBackendPoolsCertificateNameCheck: {{ $params.enforceBackendPoolsCertificateNameCheck | default false }}
+                  {{- if $params.backendPoolsSendReceiveTimeoutSeconds }}
+                  backendPoolsSendReceiveTimeoutSeconds: {{ $params.backendPoolsSendReceiveTimeoutSeconds }}
+                  {{- end }}
+                {{- if $params.frontendEndpoints }}
+                frontendEndpoint:
+                {{- range $params.frontendEndpoints }}
+                - name: {{ .name }}
+                  hostName: {{ .hostName }}
+                  {{- if hasKey . "sessionAffinityEnabled" }}
+                  sessionAffinityEnabled: {{ .sessionAffinityEnabled }}
+                  {{- end }}
+                  {{- if .sessionAffinityTtlSeconds }}
+                  sessionAffinityTtlSeconds: {{ .sessionAffinityTtlSeconds }}
+                  {{- end }}
+                {{- end }}
+                {{- end }}
+                {{- if $params.backendPoolHealthProbes }}
+                backendPoolHealthProbe:
+                {{- range $params.backendPoolHealthProbes }}
+                - name: {{ .name }}
+                  path: {{ .path | default "/" }}
+                  protocol: {{ .protocol | default "Https" }}
+                  probeMethod: {{ .probeMethod | default "GET" }}
+                  {{- if .intervalInSeconds }}
+                  intervalInSeconds: {{ .intervalInSeconds }}
+                  {{- end }}
+                  {{- if hasKey . "enabled" }}
+                  enabled: {{ .enabled }}
+                  {{- end }}
+                {{- end }}
+                {{- end }}
+                {{- if $params.backendPoolLoadBalancings }}
+                backendPoolLoadBalancing:
+                {{- range $params.backendPoolLoadBalancings }}
+                - name: {{ .name }}
+                  {{- if .sampleSize }}
+                  sampleSize: {{ .sampleSize }}
+                  {{- end }}
+                  {{- if .successfulSamplesRequired }}
+                  successfulSamplesRequired: {{ .successfulSamplesRequired }}
+                  {{- end }}
+                  {{- if .additionalLatencyMilliseconds }}
+                  additionalLatencyMilliseconds: {{ .additionalLatencyMilliseconds }}
+                  {{- end }}
+                {{- end }}
+                {{- end }}
+                {{- if $params.backendPools }}
+                backendPool:
+                {{- range $params.backendPools }}
+                - name: {{ .name }}
+                  healthProbeName: {{ .healthProbeName }}
+                  loadBalancingName: {{ .loadBalancingName }}
+                  {{- if .backends }}
+                  backend:
+                  {{- range .backends }}
+                  - address: {{ .address }}
+                    hostHeader: {{ .hostHeader }}
+                    httpPort: {{ .httpPort | default 80 }}
+                    httpsPort: {{ .httpsPort | default 443 }}
+                    {{- if .priority }}
+                    priority: {{ .priority }}
+                    {{- end }}
+                    {{- if .weight }}
+                    weight: {{ .weight }}
+                    {{- end }}
+                    {{- if hasKey . "enabled" }}
+                    enabled: {{ .enabled }}
+                    {{- end }}
+                  {{- end }}
+                  {{- end }}
+                {{- end }}
+                {{- end }}
+                {{- if $params.routingRules }}
+                routingRule:
+                {{- range $params.routingRules }}
+                - name: {{ .name }}
+                  acceptedProtocols: {{ .acceptedProtocols | toJson }}
+                  patternsToMatch: {{ .patternsToMatch | toJson }}
+                  frontendEndpoints: {{ .frontendEndpoints | toJson }}
+                  {{- if hasKey . "enabled" }}
+                  enabled: {{ .enabled }}
+                  {{- end }}
+                  {{- if .forwarding }}
+                  forwardingConfiguration:
+                  - backendPoolName: {{ .forwarding.backendPoolName }}
+                    forwardingProtocol: {{ .forwarding.forwardingProtocol | default "HttpsOnly" }}
+                    {{- if hasKey .forwarding "cacheEnabled" }}
+                    cacheEnabled: {{ .forwarding.cacheEnabled }}
+                    {{- end }}
+                    {{- if .forwarding.cacheQueryParameterStripDirective }}
+                    cacheQueryParameterStripDirective: {{ .forwarding.cacheQueryParameterStripDirective }}
+                    {{- end }}
+                    {{- if .forwarding.customForwardingPath }}
+                    customForwardingPath: {{ .forwarding.customForwardingPath }}
+                    {{- end }}
+                  {{- end }}
+                  {{- if .redirect }}
+                  redirectConfiguration:
+                  - redirectType: {{ .redirect.redirectType | default "Found" }}
+                    redirectProtocol: {{ .redirect.redirectProtocol | default "MatchRequest" }}
+                    {{- if .redirect.customHost }}
+                    customHost: {{ .redirect.customHost }}
+                    {{- end }}
+                    {{- if .redirect.customPath }}
+                    customPath: {{ .redirect.customPath }}
+                    {{- end }}
+                    {{- if .redirect.customQueryString }}
+                    customQueryString: {{ .redirect.customQueryString }}
+                    {{- end }}
+                    {{- if .redirect.customFragment }}
+                    customFragment: {{ .redirect.customFragment }}
+                    {{- end }}
+                  {{- end }}
+                {{- end }}
+                {{- end }}
+                {{- if $params.tags }}
+                tags: {{ $params.tags | toJson }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+
+            {{- range $params.customHttpsConfigurations }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: FrontdoorCustomHTTPSConfiguration
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-https
+              name: {{ $name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                frontendEndpointId: {{ .frontendEndpointId }}
+                customHttpsProvisioningEnabled: {{ .enabled | default true }}
+                {{- if .enabled | default true }}
+                customHttpsConfiguration:
+                - certificateSource: {{ .certificateSource | default "FrontDoor" }}
+                  {{- if .azureKeyVaultCertificateSecretName }}
+                  azureKeyVaultCertificateSecretName: {{ .azureKeyVaultCertificateSecretName }}
+                  {{- end }}
+                  {{- if .azureKeyVaultCertificateSecretVersion }}
+                  azureKeyVaultCertificateSecretVersion: {{ .azureKeyVaultCertificateSecretVersion }}
+                  {{- end }}
+                  {{- if .azureKeyVaultCertificateVaultId }}
+                  azureKeyVaultCertificateVaultId: {{ .azureKeyVaultCertificateVaultId }}
+                  {{- end }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+            {{- range $params.rulesEngines }}
+            ---
+            apiVersion: network.azure.m.upbound.io/v1beta1
+            kind: FrontdoorRulesEngine
+            metadata:
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: {{ .name }}-rulesengine
+              name: {{ $name }}-{{ .name }}
+              namespace: default
+            spec:
+              forProvider:
+                frontdoorNameRef:
+                  name: {{ $name }}-frontdoor
+                resourceGroupNameRef:
+                  name: {{ $rg }}
+                {{- if .rules }}
+                rule:
+                {{- range .rules }}
+                - name: {{ .name }}
+                  priority: {{ .priority }}
+                  {{- if .matchConditions }}
+                  matchCondition:
+                  {{- range .matchConditions }}
+                  - operator: {{ .operator }}
+                    {{- if .variable }}
+                    variable: {{ .variable }}
+                    {{- end }}
+                    {{- if hasKey . "negateCondition" }}
+                    negateCondition: {{ .negateCondition }}
+                    {{- end }}
+                    {{- if .selector }}
+                    selector: {{ .selector }}
+                    {{- end }}
+                    {{- if .values }}
+                    value: {{ .values | toJson }}
+                    {{- end }}
+                    {{- if .transforms }}
+                    transform: {{ .transforms | toJson }}
+                    {{- end }}
+                  {{- end }}
+                  {{- end }}
+                  {{- if or .requestHeaderActions .responseHeaderActions }}
+                  action:
+                  - {{- if .requestHeaderActions }}
+                    requestHeader:
+                    {{- range .requestHeaderActions }}
+                    - headerActionType: {{ .headerActionType }}
+                      headerName: {{ .headerName }}
+                      {{- if .value }}
+                      value: {{ .value }}
+                      {{- end }}
+                    {{- end }}
+                    {{- end }}
+                    {{- if .responseHeaderActions }}
+                    responseHeader:
+                    {{- range .responseHeaderActions }}
+                    - headerActionType: {{ .headerActionType }}
+                      headerName: {{ .headerName }}
+                      {{- if .value }}
+                      value: {{ .value }}
+                      {{- end }}
+                    {{- end }}
+                    {{- end }}
+                  {{- end }}
+                {{- end }}
+                {{- end }}
+              providerConfigRef:
+                kind: ClusterProviderConfig
+                name: default
+            {{- end }}
+
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

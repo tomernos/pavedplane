@@ -1,0 +1,125 @@
+apiVersion: platform.example.io/v1alpha1
+kind: XPlatformNetworkV3
+metadata:
+  name: prod-environment
+spec:
+  crossplane:
+    compositionRef:
+      name: azure-network-v3-stack
+  parameters:
+    location: "West Europe"
+    vnetCIDR: "10.0.0.0/16"
+    tags:
+      environment: "production"
+      managed-by: "crossplane"
+      owner: "platform-team"
+      name: "prod-environment"
+    
+    # Generic Subnets (as many as you want)
+    subnets:
+      - name: "app-subnet"
+        cidr: "10.0.1.0/24"
+      - name: "db-subnet"
+        cidr: "10.0.2.0/24"
+      # Azure Firewall must live in a subnet named exactly "AzureFirewallSubnet".
+      # K8s object name must be lowercase (-> prod-environment-fw-subnet), while
+      # the real Azure name is forced via azureName.
+      - name: "fw-subnet"
+        cidr: "10.0.3.0/24"
+        azureName: "AzureFirewallSubnet"
+    
+    # Network Security Groups (rules + automatic subnet association)
+    securityGroups:
+      - name: "web-nsg"
+        subnets: ["app-subnet"]
+        rules:
+          - name: "allow-https-in"
+            priority: 100
+            direction: "Inbound"
+            access: "Allow"
+            protocol: "Tcp"
+            sourcePortRange: "*"
+            destinationPortRange: "443"
+            sourceAddressPrefix: "*"
+            destinationAddressPrefix: "*"
+          - name: "deny-all-in"
+            priority: 4096
+            direction: "Inbound"
+            access: "Deny"
+            protocol: "*"
+            sourcePortRange: "*"
+            destinationPortRange: "*"
+            sourceAddressPrefix: "*"
+            destinationAddressPrefix: "*"
+      - name: "db-nsg"
+        subnets: ["db-subnet"]
+        rules:
+          - name: "allow-postgres-from-app"
+            priority: 100
+            direction: "Inbound"
+            access: "Allow"
+            protocol: "Tcp"
+            sourcePortRange: "*"
+            destinationPortRange: "5432"
+            sourceAddressPrefixes: ["10.0.1.0/24"]
+            destinationAddressPrefix: "*"
+
+    # Generic Public IPs
+    publicIPs:
+      - name: "main-public-ip"
+        tags:
+          usage: "nat-gateway"
+          name: "main-public-ip"
+      # Object name becomes "prod-environment-fw-public-ip" (composite name is
+      # prefixed automatically) - reference THAT from the firewall stack.
+      - name: "fw-public-ip"
+        sku: "Standard" # Azure Firewall requires a Standard public IP
+        tags:
+          usage: "firewall"
+          name: "fw-public-ip"
+
+    
+    # Generic NAT Gateways (linked to subnets and IPs above)
+    natGateways:
+      - name: "main-nat-gateway"
+        subnetName: "app-subnet"
+        publicIpName: "main-public-ip"
+        tags:
+          usage: "nat-gateway"
+          name: "main-nat-gateway"
+    
+    # Generic Private DNS Zones (automatically linked to the VNet)
+    # Each zone supports the full set of private DNS record types.
+    dnsZones:
+      - name: "internal.ezpost.com"
+        aRecords:
+          - name: "api"
+            ttl: 300
+            records: ["10.0.1.10"]
+          - name: "@" # zone apex
+            records: ["10.0.1.11"]
+        aaaaRecords:
+          - name: "api6"
+            records: ["fd00::1"]
+        cnameRecords:
+          - name: "www"
+            record: "api.internal.ezpost.com"
+        mxRecords:
+          - name: "@"
+            records:
+              - preference: 10
+                exchange: "mail.internal.ezpost.com"
+        ptrRecords:
+          - name: "10"
+            records: ["api.internal.ezpost.com"]
+        srvRecords:
+          - name: "_sip._tcp"
+            records:
+              - priority: 1
+                weight: 5
+                port: 5060
+                target: "sip.internal.ezpost.com"
+        txtRecords:
+          - name: "@"
+            records: ["v=spf1 -all"]
+      - name: "db.ezpost.com"

@@ -1,0 +1,82 @@
+apiVersion: platform.example.io/v1alpha1
+kind: XPlatformLoadBalancerV3
+metadata:
+  name: prod-lb
+spec:
+  crossplane:
+    compositionRef:
+      name: azure-loadbalancer-v3-stack
+  parameters:
+    location: "West Europe"
+    resourceGroupNameRef:
+      name: prod-environment-rg
+    sku: "Standard"
+    tags:
+      environment: "production"
+      managed-by: "crossplane"
+
+    frontendIPConfigurations:
+      # - name: "frontend-1"
+        # Kubernetes object name of an existing PublicIP (e.g. created by the network stack)
+        # publicIPRef: "prod-environment-main-public-ip"
+        # or use a raw Azure resource ID instead:
+        # publicIPId: "/subscriptions/<sub-id>/.../publicIPAddresses/my-ip"
+      # internal frontend example:
+      - name: "frontend-internal"
+        # full Kubernetes object name: the network stack prefixes its composite
+        # name, so subnet "db-subnet" of "prod-environment" becomes:
+        subnetRef: "prod-environment-db-subnet"
+      #   privateIPAddress: "10.0.1.250"
+
+    backendAddressPools:
+      - name: "web-pool"
+        addresses:
+          - name: "web-vm-1"
+            ipAddress: "10.0.1.4"
+            # Kubernetes object name of an existing VirtualNetwork
+            virtualNetworkRef: "prod-environment-vnet"
+            # or: virtualNetworkId: "/subscriptions/<sub-id>/.../virtualNetworks/my-vnet"
+
+    probes:
+      - name: "http-probe"
+        port: 80
+        protocol: "Http"
+        requestPath: "/healthz"
+        intervalInSeconds: 15
+        numberOfProbes: 2
+
+    rules:
+      - name: "http-rule"
+        protocol: "Tcp"
+        frontendPort: 80
+        backendPort: 80
+        frontendIPConfigurationName: "frontend-internal"
+        backendAddressPoolNames: ["web-pool"]
+        probeName: "http-probe"
+
+    natPools:
+      - name: "ssh-nat-pool"
+        protocol: "Tcp"
+        frontendPortStart: 50000
+        frontendPortEnd: 50100
+        backendPort: 22
+        frontendIPConfigurationName: "frontend-internal"
+
+    natRules:
+      - name: "ssh-nat-rule"
+        protocol: "Tcp"
+        frontendPort: 2222
+        backendPort: 22
+        frontendIPConfigurationName: "frontend-internal"
+
+    # Outbound rules require a PUBLIC frontend IP configuration - not valid
+    # with the internal (subnet) frontend used above. Re-enable together with
+    # a public frontend (publicIPRef) if needed.
+    outboundRules: []
+    # outboundRules:
+    #   - name: "outbound-1"
+    #     protocol: "Tcp"
+    #     backendAddressPoolName: "web-pool"
+    #     frontendIPConfigurationNames: ["frontend-public"]
+    #     allocatedOutboundPorts: 1024
+    #     idleTimeoutInMinutes: 4

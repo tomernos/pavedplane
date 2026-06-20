@@ -1,0 +1,259 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: xplatformfirewallv3s.platform.example.io
+spec:
+  group: platform.example.io
+  names:
+    kind: XPlatformFirewallV3
+    plural: xplatformfirewallv3s
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            properties:
+              crossplane:
+                type: object
+                properties:
+                  compositionRef:
+                    type: object
+                    properties:
+                      name: {type: string}
+              parameters:
+                type: object
+                properties:
+                  location: {type: string, default: "West Europe"}
+                  # Reference an existing ResourceGroup (Kubernetes object name).
+                  # When set, no ResourceGroup is created by this composite.
+                  resourceGroupNameRef:
+                    type: object
+                    properties:
+                      name: {type: string}
+                    required: [name]
+                  tags:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  skuName: {type: string, default: "AZFW_VNet"}
+                  skuTier: {type: string, default: "Standard"}
+                  threatIntelMode: {type: string}
+                  zones:
+                    type: array
+                    items: {type: string}
+                  # IP configurations for the firewall. Use raw Azure IDs or
+                  # in-cluster object names (refs) of Subnet / PublicIP.
+                  ipConfigurations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        subnetId: {type: string}
+                        subnetRef: {type: string}
+                        publicIpId: {type: string}
+                        publicIpRef: {type: string}
+                      required: [name]
+                  # Optional Firewall Policy attached to the firewall
+                  policy:
+                    type: object
+                    properties:
+                      enabled: {type: boolean, default: false}
+                      sku: {type: string, default: "Standard"}
+                      threatIntelligenceMode: {type: string}
+                      dnsProxyEnabled: {type: boolean}
+                      dnsServers:
+                        type: array
+                        items: {type: string}
+                  # Rule collection groups for the Firewall Policy (modern model)
+                  policyRuleCollectionGroups:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        priority: {type: integer}
+                        applicationRuleCollections:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              priority: {type: integer}
+                              action: {type: string, default: "Allow"}
+                              rules:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    name: {type: string}
+                                    protocols:
+                                      type: array
+                                      items:
+                                        type: object
+                                        properties:
+                                          type: {type: string}
+                                          port: {type: integer}
+                                        required: [type, port]
+                                    sourceAddresses:
+                                      type: array
+                                      items: {type: string}
+                                    destinationFqdns:
+                                      type: array
+                                      items: {type: string}
+                                  required: [name]
+                            required: [name, priority, action]
+                        networkRuleCollections:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              priority: {type: integer}
+                              action: {type: string, default: "Allow"}
+                              rules:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    name: {type: string}
+                                    protocols:
+                                      type: array
+                                      items: {type: string}
+                                    sourceAddresses:
+                                      type: array
+                                      items: {type: string}
+                                    destinationAddresses:
+                                      type: array
+                                      items: {type: string}
+                                    destinationPorts:
+                                      type: array
+                                      items: {type: string}
+                                  required: [name]
+                            required: [name, priority, action]
+                        natRuleCollections:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              priority: {type: integer}
+                              action: {type: string, default: "Dnat"}
+                              rules:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    name: {type: string}
+                                    protocols:
+                                      type: array
+                                      items: {type: string}
+                                    sourceAddresses:
+                                      type: array
+                                      items: {type: string}
+                                    destinationAddress: {type: string}
+                                    destinationPorts:
+                                      type: array
+                                      items: {type: string}
+                                    translatedAddress: {type: string}
+                                    translatedPort: {type: string}
+                                  required: [name]
+                            required: [name, priority, action]
+                      required: [name, priority]
+                  # Classic (non-policy) rule collections attached directly to the firewall
+                  applicationRuleCollections:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        priority: {type: integer}
+                        action: {type: string, default: "Allow"}
+                        rules:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              sourceAddresses:
+                                type: array
+                                items: {type: string}
+                              targetFqdns:
+                                type: array
+                                items: {type: string}
+                              protocols:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    type: {type: string}
+                                    port: {type: integer}
+                                  required: [type, port]
+                            required: [name]
+                      required: [name, priority]
+                  networkRuleCollections:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        priority: {type: integer}
+                        action: {type: string, default: "Allow"}
+                        rules:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              protocols:
+                                type: array
+                                items: {type: string}
+                              sourceAddresses:
+                                type: array
+                                items: {type: string}
+                              destinationAddresses:
+                                type: array
+                                items: {type: string}
+                              destinationPorts:
+                                type: array
+                                items: {type: string}
+                            required: [name]
+                      required: [name, priority]
+                  natRuleCollections:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        priority: {type: integer}
+                        action: {type: string, default: "Dnat"}
+                        rules:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: {type: string}
+                              protocols:
+                                type: array
+                                items: {type: string}
+                              sourceAddresses:
+                                type: array
+                                items: {type: string}
+                              destinationAddresses:
+                                type: array
+                                items: {type: string}
+                              destinationPorts:
+                                type: array
+                                items: {type: string}
+                              translatedAddress: {type: string}
+                              translatedPort: {type: string}
+                            required: [name]
+                      required: [name, priority]
+                required: [location]
+            required: [parameters]
